@@ -1,4 +1,4 @@
-# AI-Support-Agent# AI-Support-Agent
+# AI-Support-Agent
 
 ## Progress updates 
 <details><summary>Day 1 - 03/12/25</summary>
