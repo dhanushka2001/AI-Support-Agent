@@ -125,6 +125,34 @@
   ```
 
   to hold secrets & environment-dependent values (not pushed to remote, added to ``.gitignore``).
+
+* Added ``config.py``:
+
+  ```python
+  from pydantic_settings import BaseSettings
+  from functools import lru_cache
+  
+  class Settings(BaseSettings):
+      ENVIRONMENT: str = "development"
+      CORS_ALLOWED_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+  
+      # Later you can add:
+      # OPENAI_API_KEY: str
+      # DB_URL: str
+  
+      class Config:
+          env_file = ".env"
+          env_file_encoding = "utf-8"
+  
+  @lru_cache()
+  def get_settings():
+      return Settings()
+  
+  settings = get_settings()
+  ```
+
+  ``.env`` stores sensitive info (e.g., secrets, API keys, origins), ``config.py`` loads them into Python using a ``Settings`` class. Production-quality FastAPI apps always use .env + a config module. And we used ``pydantic_settings`` over ``python-dotenv`` to load the environment variables as it is cleaner, safer, faster, validated, and the recommended modern approach for FastAPI applications (type validation, required values checked, integration with FastAPI/Pydantic, default values built-in, and automatic override with OS env vars).
+  
 * Added logging middleware, that logs method, path, and timing in the console:
 
   ``app/middleware/logging.py``:
