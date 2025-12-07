@@ -1,20 +1,25 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+from typing import List
+
 
 class Settings(BaseSettings):
-    ENVIRONMENT: str = "development"
-    CORS_ALLOWED_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    ENVIRONMENT: str
+    CORS_ALLOWED_ORIGINS: List[str]
 
     # Later you can add:
     # OPENAI_API_KEY: str
     # DB_URL: str
 
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(
+        env_file = ".env",
         env_file_encoding = "utf-8"
+    )
+
 
 @lru_cache()
 def get_settings():
     return Settings()
+
 
 settings = get_settings()
