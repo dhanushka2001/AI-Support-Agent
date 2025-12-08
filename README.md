@@ -302,9 +302,10 @@
             "storage_path": filepath,
         }
     ```
-    </details>
-
+  
     using UUID to create unique file IDs.[^2]
+
+    </details>
 
   * <details><summary>Endpoint router for PDF upload</summary>
  
