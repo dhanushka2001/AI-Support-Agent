@@ -547,6 +547,223 @@
 
 </details>
 
+<details><summary> Day 4 - 11/12/25 </summary>
+
+## Day 4 - 11/12/25
+
+* <details><summary> Update .gitignore </summary>
+
+  Add this to ``.gitignore`` to prevent ``/__pycache__`` being pushed to remote:[^143]
+
+  [^143]: Python Programming Course - Imperial College London COMP70053 Lesson 8 Chapter 5.3, https://python.pages.doc.ic.ac.uk/2022/lessons/core08/05-robot/03-ignore.html
+  
+  ```
+  **/__pycache__/
+  **/*.pyc
+  ```
+
+  </details>
+
+* <details><summary> PDF Text Extraction </summary>
+
+  * Added ``app/services/pdf_service.py``:
+ 
+    ```py
+    import pdfplumber
+    from pathlib import Path
+    
+    
+    # Raised when the PDF cannot be processed.
+    class PDFExtractionError(Exception):
+        pass
+    
+    
+    # Extracts plain text from a PDF file using pdfplumber.
+    def extract_text_from_pdf(file_path: Path) -> str:
+        try:
+            text_content = []
+    
+            with pdfplumber.open(file_path) as pdf:
+                if len(pdf.pages) == 0:
+                    raise PDFExtractionError("PDF contains no pages.")
+    
+                for page in pdf.pages:
+                    page_text = page.extract_text() or ""
+                    text_content.append(page_text)
+    
+            full_text = "\n".join(text_content).strip()
+    
+            if not full_text:
+                raise PDFExtractionError("PDF text extraction returned empty content.")
+    
+            return full_text
+    
+        except Exception as e:
+            raise PDFExtractionError(f"Failed to extract PDF text: {str(e)}")
+    
+    ```
+
+    which extracts text from the PDF using ``pdfplumber`` (added to ``requirements.txt`` and installed via ``pip install pdfplumber``).
+
+  * Removed error handling from ``app/routers/pdf_upload.py`` (as ``save_pdf()`` from ``file_storage.py`` already handles that):
+ 
+    ```diff
+      from fastapi import APIRouter, UploadFile, File, HTTPException
+      from app.services.file_storage import save_pdf
+      
+      router = APIRouter(prefix="/pdf", tags=["PDF Upload"])
+      
+      
+      @router.post("/upload")
+      async def upload_pdf(file: UploadFile = File(...)):
+    -     if file is None:
+    -         raise HTTPException(status_code=400, detail="No file uploaded.")
+      
+          metadata = save_pdf(file)
+          return {
+              "message": "PDF uploaded successfully",
+              "metadata": metadata
+          }
+    ```
+
+  </details>
+
+* <details><summary> Temp Text Return </summary>
+
+  * Added ``app/routers/pdf_extract.py``:
+ 
+    ```py
+    from fastapi import APIRouter, HTTPException
+    from app.services.file_storage import get_pdf_path
+    from app.services.pdf_service import extract_text_from_pdf, PDFExtractionError
+    from pathlib import Path
+    
+    router = APIRouter(prefix="/pdf", tags=["PDF Extraction"])
+    
+    
+    @router.post("/{file_id}/extract")
+    def extract_pdf_text(file_id: str):
+        try:
+            pdf_path = Path(get_pdf_path(file_id))
+            text = extract_text_from_pdf(pdf_path)
+    
+            return {
+                "file_id": file_id,
+                "text_length": len(text),
+                "text_preview": text[:1000],  # prevent massive response
+            }
+    
+        except PDFExtractionError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    ```
+
+  * Updated ``app/main.py``:
+ 
+    ```diff
+      from fastapi import FastAPI
+      from fastapi.middleware.cors import CORSMiddleware
+      
+      
+      from app.config import settings
+      from app.middleware.logging import LoggingMiddleware
+      from app.routers.health import router as health_router
+    - from app.routers.pdf_upload import router as pdf_router
+    + from app.routers.pdf_upload import router as pdf_upload_router
+    + from app.routers.pdf_extract import router as pdf_extract_router
+      
+      
+      app = FastAPI(
+          title="AI Support Agent",
+          version="1.0.0"
+      )
+      
+      
+      # -----------
+      # CORS CONFIG
+      # -----------
+      app.add_middleware(
+          CORSMiddleware,
+          allow_origins=settings.CORS_ALLOWED_ORIGINS,
+          allow_credentials=True,
+          allow_methods=["*"],
+          allow_headers=["*"],
+      )
+      
+      
+      # -------
+      # LOGGING
+      # -------
+      app.add_middleware(LoggingMiddleware)
+      
+      
+      # -------
+      # ROUTERS
+      # -------
+      app.include_router(health_router)
+    - app.include_router(pdf_router)
+    + app.include_router(pdf_upload_router)
+    + app.include_router(pdf_extract_router)
+      
+      
+      @app.get("/")
+      async def root():
+          return {"message": "Hello World"}
+    ```
+
+  * Result:
+
+    <img width="956" height="825" alt="image" src="https://github.com/user-attachments/assets/d77553e2-bd2f-4f42-8f14-05434917285b" />
+     
+     * When uploading a valid PDF:
+
+       ```json
+        {
+          "message": "PDF uploaded successfully",
+          "metadata": {
+            "file_id": "d64c5531-892a-42b1-9d62-af9661448200",
+            "filename": "Computer Simulation of Saturn's Ring Structure.pdf",
+            "stored_filename": "d64c5531-892a-42b1-9d62-af9661448200.pdf",
+            "path": "E:\\...\\AI-Support-Agent\\app\\storage\\pdfs\\d64c5531-892a-42b1-9d62-af9661448200.pdf",
+            "size_bytes": 3026909,
+            "content_type": "application/pdf"
+          }
+        }
+       ```
+
+    * When entering a non-valid format:
+   
+      ```json
+      {
+        "detail": {
+          "error": "File extension must be .pdf"
+        }
+      }
+      ```
+
+    * Extracting text from valid file ID:
+   
+      ```json
+      {
+        "file_id": "d64c5531-892a-42b1-9d62-af9661448200",
+        "text_length": 42442,
+        "text_preview": "Computer Simulation of Saturn’s Ring\nStructure\nNew Mexico\nSupercomputing Challenge\nFinal Report\nApril 3, 2013\nTeam 58\nLos Alamos High School\nTeam Members\nCole Kendrick\nTeachers\nBrian Kendrick\nProject Mentor\nBrian Kendrick\nSummary\nThe main goal of this project is to develop a computer program to model the creation of\nstructure in Saturn’s ring system. The computer program will be used to answer these\nquestions: (1) How are gaps in Saturn’s Rings formed; (2) how accurately can I model\ngap formation with a 3D N-Body simulation; and (3) will my simulation compare to\nobserved features, theoretical data, and professional simulations. Newton’s laws of\nmotion and gravity as well as the velocity Verlet method are being used to orbit the\nparticles around Saturn. Gaps in Saturn’s ring system are caused by three main methods:\n(1) Gravitational resonances; (2) moons that orbit inside the ring; and (3) an asteroid or\ncomet impact. Gravitational resonances are a major part of formation in the ring sy"
+      }
+      ```
+
+    * Attempting to extract text from non-valid file ID:
+   
+      ```json
+      {
+        "detail": {
+          "error": "PDF not found."
+        }
+      }
+      ```
+
+  </details>
+
+</details>
+
 
 <!--
 <details><summary> Day N </summary>
