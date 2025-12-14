@@ -36,15 +36,33 @@ def save_pdf(file: UploadFile) -> dict:
     filename = f"{file_id}.pdf"
     filepath = os.path.join(BASE_DIR, filename)
 
+    #  Read file bytes
+    file_bytes = file.file.read()
+
     # Save file data
     with open(filepath, "wb") as out_file:
-        out_file.write(file.file.read())
+        out_file.write(file_bytes)
+
+    # Reset pointer so file can be re-read if needed later
+    file.file.seek(0)
 
     # Return metadata
     return {
         "file_id": file_id,
-        "filename": filename,
+        "filename": file.filename,
+        "stored_filename": filename,
+        "path": filepath,
         "size_bytes": os.path.getsize(filepath),
         "content_type": file.content_type,
-        "storage_path": filepath,
     }
+
+
+def get_pdf_path(file_id: str) -> str:
+    filename = f"{file_id}.pdf"
+    filepath = os.path.join(BASE_DIR, filename)
+
+    if not os.path.exists(filepath):
+        raise bad_request("PDF not found.")
+
+    return filepath
+

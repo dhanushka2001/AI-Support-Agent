@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.middleware.logging import LoggingMiddleware
 from app.routers.health import router as health_router
-from app.routers.pdf_upload import router as pdf_router
+from app.routers.pdf_upload import router as pdf_upload_router
+from app.routers.pdf_extract import router as pdf_extract_router
 
 
 app = FastAPI(
@@ -36,7 +37,8 @@ app.add_middleware(LoggingMiddleware)
 # ROUTERS
 # -------
 app.include_router(health_router)
-app.include_router(pdf_router)
+app.include_router(pdf_upload_router)
+app.include_router(pdf_extract_router)
 
 
 @app.get("/")
