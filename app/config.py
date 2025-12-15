@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     ENVIRONMENT: str
     CORS_ALLOWED_ORIGINS: List[str]
 
+    MONGODB_URI: str
+    MONGODB_DB: str
+
     # Later you can add:
     # OPENAI_API_KEY: str
     # DB_URL: str

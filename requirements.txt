@@ -4,3 +4,4 @@ python-dotenv
 pydantic-settings
 pdfplumber
 pillow
+pymongo>=4.6

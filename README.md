@@ -110,9 +110,7 @@
 
 [^5]: Virtual Environments - FastAPI, https://fastapi.tiangolo.com/virtual-environments/
   
-* Switched from using ``fastapi dev main.py``[^6] (quick sandbox testing, accepts only relative importing, e.g. ``from .routers.health import router as health_router
-``) to load the web API to ``uvicorn app.main:app --reload --host 127.0.0.1 --port 8000``[^6][^7][^8] (recommended production-standard approach, accepts absolute importing, e.g. ``from app.routers.health import router as health_router
-``). The latter command didn't work initially (website hanged) but after running these commands in PowerShell (administrator mode):
+* Switched from using ``fastapi dev main.py``[^6] (quick sandbox testing, accepts only relative importing, e.g. ``from .routers.health import router as health_router``) to load the web API to ``uvicorn app.main:app --reload --host 127.0.0.1 --port 8000``[^7][^8][^9] (recommended production-standard approach, accepts absolute importing, e.g. ``from app.routers.health import router as health_router``). The latter command didn't work initially (website hanged) but after running these commands in PowerShell (administrator mode):
 
   ```console
   netsh winsock reset
@@ -122,12 +120,12 @@
    and restarting my PC it worked.
 
 [^6]: First Steps - FastAPI, https://fastapi.tiangolo.com/tutorial/first-steps/
-[^10]: Deployment - Uvicorn, https://uvicorn.dev/deployment/
-[^11]: Run a Server Manually - FastAPI, https://fastapi.tiangolo.com/deployment/manually/
-[^12]: Debugging - FastAPI, https://fastapi.tiangolo.com/tutorial/debugging/
+[^7]: Deployment - Uvicorn, https://uvicorn.dev/deployment/
+[^8]: Run a Server Manually - FastAPI, https://fastapi.tiangolo.com/deployment/manually/
+[^9]: Debugging - FastAPI, https://fastapi.tiangolo.com/tutorial/debugging/
   
   
-* Added a ``.env`` file:[^7]
+* Added a ``.env`` file:[^10]
 
   ```env
   # Deployment environment
@@ -139,9 +137,9 @@
 
   to hold secrets & environment-dependent values (not pushed to remote, added to ``.gitignore``).
 
-[^7]: Settings and Environment Variables - FastAPI, https://fastapi.tiangolo.com/advanced/settings
+[^10]: Settings and Environment Variables - FastAPI, https://fastapi.tiangolo.com/advanced/settings
 
-* Added ``config.py``:[^7]
+* Added ``config.py``:[^10]
 
   ```python
   from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -171,11 +169,11 @@
   settings = get_settings()
   ```
 
-  ``.env`` stores sensitive info (e.g., secrets, API keys, origins), ``config.py`` loads them into Python using a ``Settings`` class (using Pydantic v2).[^7][^8] Production-quality FastAPI apps always use .env + a config module. And we used ``pydantic_settings`` over ``python-dotenv`` to load the environment variables as it is cleaner, safer, faster, validated, and the recommended modern approach for FastAPI applications (type validation, required values checked, integration with FastAPI/Pydantic, default values built-in, and automatic override with OS env vars).
+  ``.env`` stores sensitive info (e.g., secrets, API keys, origins), ``config.py`` loads them into Python using a ``Settings`` class (using Pydantic v2).[^10][^11] Production-quality FastAPI apps always use .env + a config module. And we used ``pydantic_settings`` over ``python-dotenv`` to load the environment variables as it is cleaner, safer, faster, validated, and the recommended modern approach for FastAPI applications (type validation, required values checked, integration with FastAPI/Pydantic, default values built-in, and automatic override with OS env vars).
 
-[^8]: Read settings from .env - Settings and Environment Variables - FastAPI, https://fastapi.tiangolo.com/advanced/settings/?h=#read-settings-from-env
+[^11]: Read settings from .env - Settings and Environment Variables - FastAPI, https://fastapi.tiangolo.com/advanced/settings/?h=#read-settings-from-env
   
-* Added logging middleware,[^9] that logs method, path, and timing in the console:
+* Added logging middleware,[^12] that logs method, path, and timing in the console:
 
   ``app/middleware/logging.py``:
   
@@ -211,9 +209,9 @@
   app.add_middleware(LoggingMiddleware)
   ```
 
-[^9]: Middleware - FastAPI, https://fastapi.tiangolo.com/tutorial/middleware/
+[^12]: Middleware - FastAPI, https://fastapi.tiangolo.com/tutorial/middleware/
   
-* The current folder structure:
+* The current folder structure:[^13]
 
   ```
   AI-Support-Agent/
@@ -229,6 +227,9 @@
   ├── requirements.txt
   └── README.md
   ```
+
+  [^13]: How to Structure Your FastAPI Projects, Amir Lavasani, 
+May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-fastapi-projects-0219a6600a8f
 
 </details>
 
@@ -252,7 +253,7 @@
       │   │   └── pdfs/           <-- auto-created
       │   └── routers/
       │       ├── health.py
-      │       └──pdf_upload.py    <-- NEW
+      │       └── pdf_upload.py   <-- NEW
       ├── .env
       ├── .gitignore
       ├── requirements.txt
@@ -404,7 +405,7 @@
       │   │   └── errors.py          <-- NEW (standardised error responses)
       │   └── routers/
       │       ├── health.py
-      │       └──pdf_upload.py
+      │       └── pdf_upload.py
       ├── .env
       ├── .gitignore
       ├── requirements.txt
@@ -551,11 +552,38 @@
 
 ## Day 4 - 11/12/25
 
+  * <details><summary>New folder structure</summary>
+
+    ```
+    AI-Support-Agent/
+      ├── app/
+      │   ├── main.py
+      │   ├── config.py
+      │   ├── middleware/
+      │   │   └── logging.py
+      │   ├── services/
+      │   │   ├── file_storage.py
+      │   │   └── pdf_service.py     <-- NEW
+      │   ├── storage/
+      │   │   └── pdfs/
+      │   ├── core/
+      │   │   └── errors.py
+      │   └── routers/
+      │       ├── health.py
+      │       ├── pdf_upload.py
+      │       └── pdf_extract.py     <-- NEW
+      ├── .env
+      ├── .gitignore
+      ├── requirements.txt
+      └── README.md
+    ```
+    </details>
+
 * <details><summary> Update .gitignore </summary>
 
-  Add this to ``.gitignore`` to prevent ``/__pycache__`` being pushed to remote:[^143]
+  Add this to ``.gitignore`` to prevent ``/__pycache__`` being pushed to remote:[^14]
 
-  [^143]: Python Programming Course - Imperial College London COMP70053 Lesson 8 Chapter 5.3, https://python.pages.doc.ic.ac.uk/2022/lessons/core08/05-robot/03-ignore.html
+  [^14]: Python Programming Course - Imperial College London COMP70053 Lesson 8 Chapter 5.3, https://python.pages.doc.ic.ac.uk/2022/lessons/core08/05-robot/03-ignore.html
   
   ```
   **/__pycache__/
@@ -759,6 +787,128 @@
         }
       }
       ```
+
+  </details>
+
+</details>
+
+<details><summary> Day 5 - 14/21/25 </summary>
+
+## Day 5 - 13/21/25
+
+* <details><summary> MongoDB Integration </summary>
+
+  * Chose to use MongoDB Atlas free tier instead of local MongoDB as it means:
+    * No local install headaches
+    * No service to keep running
+    * Works the same locally and in production
+    * Teaches the “real” way MongoDB is used
+    * Free forever (with limits)
+
+    I can always switch to local MongoDB later in ~5 minutes.
+
+  * I already have a MongoDB account, so just had to setup a new project with a free-tier cluster, create a database user with read/write access, allowed network access from anywhere (can change later).
+  * When connecting to the cluster, I simply select the latest Python driver. This gives me the command to install:
+ 
+    ```console
+    python -m pip install "pymongo[srv]"
+    ```
+
+    and a connection string:
+
+    ```py
+    mongodb+srv://appuser:<db_password>@cluster0.ycojzhc.mongodb.net/?appName=Cluster0
+    ```
+
+    Replacing <db_password> with the password for the appuser database user. And ensuring any option params are URL encoded.
+
+  * Adding to ``.env`` the connection string (replacing ``YOUR_PASSWORD`` with the password of the database user I just created):
+ 
+    ```env
+    MONGODB_URI=mongodb+srv://appuser:YOUR_PASSWORD@cluster0.xxxxx.mongodb.net/?appName=CLUSTER_NAME
+    MONGODB_DB=ai_support_agent
+    ```
+
+  * Adding to ``requirements.txt``:
+ 
+    ```txt
+    pymongo>=4.6
+    ```
+
+  * Created the MongoDB connection file, ``app/db/mongodb.py``:
+ 
+    ```py
+    from pymongo import MongoClient
+    from app.config import settings
+    
+    client = MongoClient(settings.MONGODB_URI)
+    db = client[settings.MONGODB_DB]
+    
+    documents_collection = db["documents"]
+    ```
+
+    Now I have: One client, one DB, one collection.
+
+  * Document repository (persistance layer), ``app/services/document_repository.py``:
+ 
+    ```py
+    from datetime import datetime
+    from app.db.mongodb import documents_collection
+    
+    
+    def create_document(metadata: dict) -> dict:
+        document = {
+            "file_id": metadata["file_id"],
+            "original_filename": metadata["filename"],
+            "stored_filename": metadata["stored_filename"],
+            "size_bytes": metadata["size_bytes"],
+            "content_type": metadata["content_type"],
+            "status": "UPLOADED",
+            "created_at": datetime.utcnow(),
+        }
+    
+        documents_collection.insert_one(document)
+        return document
+    ```
+
+    Now I have two layers of persistance: a local file storage (``app/storage/pdfs`` handled by ``app/services/file_storage.py``), and MongoDB (document repository).
+
+  * Updating ``app/routers/pdf_upload.py`` to wire MongoDB into upload flow:
+ 
+    ```diff
+      from fastapi import APIRouter, UploadFile, File, HTTPException
+      from app.services.file_storage import save_pdf
+    + from app.services.document_repository import create_document
+      
+      
+      router = APIRouter(prefix="/pdf", tags=["PDF Upload"])
+      
+      
+      @router.post("/upload")
+      async def upload_pdf(file: UploadFile = File(...)):
+          metadata = save_pdf(file)
+    +     document = create_document(metadata)
+      
+          return {
+              "message": "PDF uploaded successfully",
+              "metadata": metadata,
+    +         "file_id": document["file_id"],
+    +         "status": document["status"]
+          }
+      ```
+
+  * Restarting the server (``uvicorn app.main:app --reload --host 127.0.0.1 --port 8000``), uploading a PDF via Swagger (``http://127.0.0.1:8000/docs``), and going to Go to Atlas → Browse Collections in the MongoDB project cluster, I can see the new document added:
+ 
+    ```json
+    {"_id":{"$oid":"693f80edcadadd721e4ecd75"},"file_id":"27ff3caa-2fbc-4418-b16f-bbb0af29c4a9","original_filename":"Print cover sheet - Get a document legalised - GOV.UK-2.pdf","stored_filename":"27ff3caa-2fbc-4418-b16f-bbb0af29c4a9.pdf","size_bytes":{"$numberInt":"90281"},"content_type":"application/pdf","status":"UPLOADED","created_at":{"$date":{"$numberLong":"1765769453956"}}}
+    ```
+
+
+  </details>
+
+* <details><summary> Store Extracted Text </summary>
+
+  ...
 
   </details>
 
