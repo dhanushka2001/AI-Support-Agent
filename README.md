@@ -897,10 +897,19 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
           }
       ```
 
-  * Restarting the server (``uvicorn app.main:app --reload --host 127.0.0.1 --port 8000``), uploading a PDF via Swagger (``http://127.0.0.1:8000/docs``), and going to Go to Atlas → Browse Collections in the MongoDB project cluster, I can see the new document added:
+  * Restarting the server (``uvicorn app.main:app --reload --host 127.0.0.1 --port 8000``), uploading a PDF via Swagger (``http://127.0.0.1:8000/docs``), and going to Atlas → Browse Collections in the MongoDB project cluster, I can see the new document added:
  
     ```json
-    {"_id":{"$oid":"693f80edcadadd721e4ecd75"},"file_id":"27ff3caa-2fbc-4418-b16f-bbb0af29c4a9","original_filename":"Print cover sheet - Get a document legalised - GOV.UK-2.pdf","stored_filename":"27ff3caa-2fbc-4418-b16f-bbb0af29c4a9.pdf","size_bytes":{"$numberInt":"90281"},"content_type":"application/pdf","status":"UPLOADED","created_at":{"$date":{"$numberLong":"1765769453956"}}}
+    {
+      "_id":{"$oid":"693f80edcadadd721e4ecd75"},
+      "file_id":"27ff3caa-2fbc-4418-b16f-bbb0af29c4a9",
+      "original_filename":"Print cover sheet - Get a document legalised - GOV.UK-2.pdf",
+      "stored_filename":"27ff3caa-2fbc-4418-b16f-bbb0af29c4a9.pdf",
+      "size_bytes":90281,
+      "content_type":"application/pdf",
+      "status":"UPLOADED",
+      "created_at":2025-12-15T03:30:53.956+00:00
+    }
     ```
 
 
@@ -908,8 +917,248 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 
 * <details><summary> Store Extracted Text </summary>
 
-  ...
+  * Currently the system workflow is:
+ 
+    ```
+    1. Save file to disk
+    2. Save metadata to MongoDB (status = UPLOADED)
+    ```
 
+  * Want to extend it to:
+ 
+    ```
+    1. Save file to disk
+    2. Save metadata (UPLOADED)
+    
+    3. Read PDF from disk
+    4. Extract text
+    5. Store extracted text in MongoDB
+    6. Update status = EXTRACTED
+    ```
+
+  * Will add two new fields to the existing document format in MongoDB:
+ 
+    ```
+    {
+      "extracted_text": "full plain text...",  <-- NEW
+      "status": "EXTRACTED",                   <-- new status
+      "extracted_at": ISODate(...)             <-- NEW
+    }
+    ```
+
+  * Add method to store extracted text and function to get file ID (for later), update ``app/services/document_repository.py``:
+ 
+    ```diff
+      from datetime import datetime
+      from app.db.mongodb import documents_collection
+      
+      
+      def create_document(metadata: dict) -> dict:
+          document = {
+              "file_id": metadata["file_id"],
+              "original_filename": metadata["filename"],
+              "stored_filename": metadata["stored_filename"],
+              "size_bytes": metadata["size_bytes"],
+              "content_type": metadata["content_type"],
+              "status": "UPLOADED",
+              "created_at": datetime.utcnow(),
+          }
+      
+          documents_collection.insert_one(document)
+          return document
+      
+      
+    + def get_document_by_file_id(file_id: str) -> dict | None:
+    +     return documents_collection.find_one({"file_id": file_id})
+      
+      
+    + def store_extracted_text(file_id: str, text: str):
+    +     result = documents_collection.update_one(
+    +         {"file_id": file_id},
+    +         {
+    +             "$set": {
+    +                 "extracted_text": text,
+    +                 "status": "EXTRACTED",
+    +                 "extracted_at": datetime.utcnow(),
+    +             }
+    +         }
+    +     )
+    + 
+    +     if result.matched_count == 0:
+    +         raise ValueError("Document not found")
+    ```
+
+  * Updated ``app/routers/pdf_extract.py``:
+ 
+    ```diff
+      from fastapi import APIRouter, HTTPException
+      from pathlib import Path
+      
+      from app.services.file_storage import get_pdf_path
+      from app.services.pdf_service import extract_text_from_pdf, PDFExtractionError
+    + from app.services.document_repository import (
+    +     store_extracted_text,
+    +     get_document_by_file_id,
+    + )
+      
+      router = APIRouter(prefix="/pdf", tags=["PDF Extraction"])
+      
+      
+      @router.post("/{file_id}/extract")
+      def extract_pdf_text(file_id: str):
+    +     document = get_document_by_file_id(file_id)
+    
+    +     if not document:
+    +         raise HTTPException(status_code=404, detail="Document not found")
+    
+    +     if document.get("status") == "EXTRACTED":
+    +         return {
+    +             "message": "Text already extracted",
+    +             "file_id": file_id,
+    +         }
+      
+          try:
+              pdf_path = Path(get_pdf_path(file_id))
+              text = extract_text_from_pdf(pdf_path)
+      
+    +         store_extracted_text(file_id, text)
+      
+              return {
+                  "file_id": file_id,
+                  "text_length": len(text),
+                  "text_preview": text[:1000],  # prevent massive response
+              }
+      
+          except PDFExtractionError as e:
+              raise HTTPException(status_code=422, detail=str(e))
+      ```
+
+      which resolves the file path, extracts text, stores in MongoDB, and returns a preview. But now with the addition that if the document has already had its text extracted, it should give an error, rather than extracting again.
+
+  * Later I can add:
+ 
+    ```mongodb
+    GET /pdf/{file_id}/text
+    ```
+
+    for when the user needs the full context.
+
+  * To test, I re-ran: ``uvicorn app.main:app --reload --host 127.0.0.1 --port 8000``.
+  * Uploading an invalid file:
+
+    ```json
+    {
+      "detail": {
+        "error": "File extension must be .pdf"
+      }
+    }
+    ```
+    
+  * Uploading a valid PDF:
+ 
+    ```json
+    {
+      "message": "PDF uploaded successfully",
+      "metadata": {
+        "file_id": "bcba93d7-8f17-4809-8598-53b9a0f5d96d",
+        "filename": "Computer Simulation of Saturn's Ring Structure.pdf",
+        "stored_filename": "bcba93d7-8f17-4809-8598-53b9a0f5d96d.pdf",
+        "path": "E:\\...\\AI-Support-Agent\\app\\storage\\pdfs\\bcba93d7-8f17-4809-8598-53b9a0f5d96d.pdf",
+        "size_bytes": 3026909,
+        "content_type": "application/pdf"
+      },
+      "file_id": "bcba93d7-8f17-4809-8598-53b9a0f5d96d",
+      "status": "UPLOADED"
+    }
+    ```
+
+  * Extracting an invalid ID:
+ 
+    ```json
+    {
+      "detail": "Document not found"
+    }
+    ```
+
+  * Extracting a valid ID:
+ 
+    ```json
+    {
+      "file_id": "bcba93d7-8f17-4809-8598-53b9a0f5d96d",
+      "text_length": 42442,
+      "text_preview": "Computer Simulation of Saturn’s Ring\nStructure\nNew Mexico\nSupercomputing Challenge\nFinal Report\nApril 3, 2013\nTeam 58\nLos Alamos High School\nTeam Members\nCole Kendrick\nTeachers\nBrian Kendrick\nProject Mentor\nBrian Kendrick\nSummary\nThe main goal of this project is to develop a computer program to model the creation of\nstructure in Saturn’s ring system. The computer program will be used to answer these\nquestions: (1) How are gaps in Saturn’s Rings formed; (2) how accurately can I model\ngap formation with a 3D N-Body simulation; and (3) will my simulation compare to\nobserved features, theoretical data, and professional simulations. Newton’s laws of\nmotion and gravity as well as the velocity Verlet method are being used to orbit the\nparticles around Saturn. Gaps in Saturn’s ring system are caused by three main methods:\n(1) Gravitational resonances; (2) moons that orbit inside the ring; and (3) an asteroid or\ncomet impact. Gravitational resonances are a major part of formation in the ring sy"
+    }
+    ```
+
+  * Extracting a valid ID that has already been extracted:
+ 
+    ```json
+    {
+      "message": "Text already extracted",
+      "file_id": "bcba93d7-8f17-4809-8598-53b9a0f5d96d"
+    }
+    ```
+
+  * On MongoDB the document goes from:
+ 
+    ```
+    _id: ObjectID('6940244cd59fc43fe0bd8d73')
+    file_id: "bcba93d7-8f17-4809-8598-53b9a0f5d96d"
+    original_filename: "Computer Simulation of Saturn's Ring Structure.pdf"
+    stored_filename: "bcba93d7-8f17-4809-8598-53b9a0f5d96d.pdf"
+    size_bytes: 3026909
+    content_type: "application/pdf"
+    status: "UPLOADED"
+    created_at: 2025-12-15T15:07:56.295+00:00
+    ```
+
+    to:
+
+    ```
+    _id: ObjectID('6940244cd59fc43fe0bd8d73')
+    file_id: "bcba93d7-8f17-4809-8598-53b9a0f5d96d"
+    original_filename: "Computer Simulation of Saturn's Ring Structure.pdf"
+    stored_filename: "bcba93d7-8f17-4809-8598-53b9a0f5d96d.pdf"
+    size_bytes: 3026909
+    content_type: "application/pdf"
+    status: "UPLOADED"
+    created_at: 2025-12-15T15:07:56.295+00:00
+    extracted_at: 2025-12-15T15:12:47.007+00:00
+    extracted_text: "Computer Simulation of Saturn’s Ring Structure New Mexico Supercomputi…"
+    ```
+
+    MongoDB Atlas UI automatically truncates ``extracted_text``, but quickly verifying by copying the document into Notepad proves that it does indeed store the entire document (5,889 words 43,604 characters).
+    
+  </details>
+
+* <details><summary>New folder structure</summary>
+
+    ```
+    AI-Support-Agent/
+      ├── app/
+      │   ├── main.py
+      │   ├── config.py
+      │   ├── middleware/
+      │   │   └── logging.py
+      │   ├── services/
+      │   │   ├── file_storage.py
+      │   │   ├── pdf_service.py
+      │   │   └── document_repository.py   <-- NEW
+      │   ├── storage/
+      │   │   └── pdfs/
+      │   ├── core/
+      │   │   └── errors.py
+      │   ├── routers/
+      │   │   ├── health.py
+      │   │   ├── pdf_upload.py
+      │   │   └── pdf_extract.py
+      │   └── db/
+      │       └── mongodb.py                <-- NEW
+      ├── .env
+      ├── .gitignore
+      ├── requirements.txt
+      └── README.md
+    ```
   </details>
 
 </details>
