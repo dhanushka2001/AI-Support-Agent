@@ -16,3 +16,22 @@ def create_document(metadata: dict) -> dict:
     documents_collection.insert_one(document)
     return document
 
+
+def get_document_by_file_id(file_id: str) -> dict | None:
+    return documents_collection.find_one({"file_id": file_id})
+
+
+def store_extracted_text(file_id: str, text: str):
+    result = documents_collection.update_one(
+        {"file_id": file_id},
+        {
+            "$set": {
+                "extracted_text": text,
+                "status": "EXTRACTED",
+                "extracted_at": datetime.utcnow(),
+            }
+        }
+    )
+
+    if result.matched_count == 0:
+        raise ValueError("Document not found")
