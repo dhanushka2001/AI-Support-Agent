@@ -1163,6 +1163,248 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 
 </details>
 
+<details><summary> Day 6 - 16/12/25 </summary>
+
+## Day 6 - 16/12/25
+
+* <details><summary> Setup Qdrant </summary>
+
+  * I chose to use Docker instead of a local binary as it means zero installation pain, same setup works in production later, easy persistance, and easy teardown/reset. Plus I already have Docker Desktop installed.
+  * I opened Docker Desktop, waited for it to say "Docker Desktop is running", and verified by running ``docker version`` in cmd, which showed both Client and Server info.
+  * I created a Qdrant persistence folder:
+ 
+    ```
+    AI-Support-Agent/
+    └── qdrant_data/
+    ```
+
+    and added it to ``.gitignore``:
+
+    ```
+    # Qdrant local data
+    qdrant_data/
+    ```
+    
+  * Then I ran Qdrant with Docker:[^15]
+ 
+    ```cmd
+    docker run -d --name qdrant -p 6333:6333 -v "%cd%\qdrant_data:/qdrant/storage" qdrant/qdrant
+    ```
+
+    [^15]: Qdrant installation guide, https://qdrant.tech/documentation/guides/installation/#docker
+
+  * Running ``docker ps`` I can see:
+ 
+    ```cmd
+    CONTAINER ID   IMAGE           COMMAND             CREATED          STATUS         PORTS                              NAMES
+    792d5b6076b5   qdrant/qdrant   "./entrypoint.sh"   10 seconds ago   Up 6 seconds   0.0.0.0:6333->6333/tcp, 6334/tcp   qdrant
+    ```
+
+  * Added to ``requirements.txt``:
+ 
+    ```
+    qdrant-client
+    ```
+
+    and re-ran ``pip install -r requirements.txt``
+
+  * Created a Qdrant client wrapper, ``app/db/qdrant.py``:[^16]
+ 
+    ```py
+    from qdrant_client import QdrantClient
+
+    qdrant_client = QdrantClient(
+        host="localhost",
+        port=6333
+    )
+    ```
+ 
+    similar to the client wrapper for MongoDB in ``app/db/mongodb.py``.
+    
+    [^16]: Qdrant Local Quickstart, https://qdrant.tech/documentation/quickstart/#initialize-the-client
+
+  * Created a temporary test endpoint, ``app/routers/qdrant_health.py`` to verify backend can reach Qdrant:[^17]
+ 
+    ```py
+    from fastapi import APIRouter
+    from app.db.qdrant import qdrant_client
+    
+    router = APIRouter(prefix="/qdrant", tags=["Qdrant"])
+    
+    @router.get("/health")
+    def qdrant_health():
+        collections = qdrant_client.get_collections()
+        return {
+            "status": "ok",
+            "collections": [c.name for c in collections.collections]
+        }
+    ```
+
+    [^17]: Qdrant API Reference - List all collections, https://api.qdrant.tech/v-1-12-x/api-reference/collections/get-collections
+
+  * Updated ``main.py`` to include the new Qdrant router:
+ 
+    ```py
+    from app.routers.qdrant_health import router as qdrant_health_router
+
+    app.include_router(qdrant_health_router)
+    ```
+
+  * And I can successfully see ``GET /qdrant/health`` which outputs:
+ 
+    ```json
+    {
+      "status": "ok",
+      "collections": []
+    }
+    ```
+
+  </details>
+
+* <details><summary> Create Vector Collection </summary>
+
+  * For the distance metric I will use Cosine similarity over Euclidean distance as this allows it to focus on semantic direction (meaning) rather than vector magnitude (length).[^18]
+
+    <img width="937" height="429" alt="image" src="https://github.com/user-attachments/assets/f94f676c-5c8b-4494-804d-e443aa53f3c5" />
+
+    [^18]: What is Cosine similarity?, IBM, https://www.ibm.com/think/topics/cosine-similarity
+
+  * The word embedding model we'll likely use is ``text-embedding-3-small`` from OpenAI which has a dimension size of 1536.[^19]
+ 
+    [^19]: Vector embeddings, Open AI API, https://platform.openai.com/docs/guides/embeddings
+
+  * I chose to name the collection ``documents_embeddings``, to make it clear what the embeddings are used for.
+
+  * Here is how I implemented Qdrant client + collection creation in ``app/db/qdrant.py``:
+ 
+    ```py
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import Distance, VectorParams
+    
+    QDRANT_HOST = "localhost"
+    QDRANT_PORT = 6333
+    
+    COLLECTION_NAME = "documents_embeddings"
+    VECTOR_SIZE = 1536  # OpenAI embedding dimension
+    
+    
+    def get_qdrant_client() -> QdrantClient:
+        return QdrantClient(
+            host=QDRANT_HOST,
+            port=QDRANT_PORT,
+        )
+    
+    
+    def create_collection_if_not_exists():
+        client = get_qdrant_client()
+    
+        collections = client.get_collections().collections
+        existing_names = {c.name for c in collections}
+    
+        if COLLECTION_NAME in existing_names:
+            return  # already exists
+    
+        client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=VectorParams(
+                size=VECTOR_SIZE,
+                distance=Distance.COSINE,
+            ),
+        )
+    ```
+
+    This is infrastructure, not routing. We don't want to recreate collections on every request.
+    
+  * Adding this to ``app/main.py`` create the collection once at startup:
+ 
+    ```py
+    from app.db.qdrant import create_collection_if_not_exists
+
+    @app.on_event("startup")
+    def startup_event():
+        create_collection_if_not_exists()
+    ```
+
+  * And updating ``app/routers/qdrant_health.py``:
+ 
+    ```diff
+      from fastapi import APIRouter
+    - from app.db.qdrant import qdrant_client
+    + from app.db.qdrant import get_qdrant_client
+      
+      router = APIRouter(prefix="/qdrant", tags=["Qdrant"])
+      
+      @router.get("/health")
+      def qdrant_health():
+    -     collections = qdrant_client.get_collections()
+    -     return {
+    -         "status": "ok",
+    -         "collections": [c.name for c in collections.collections]
+    -     }
+    +     try:
+    +         client = get_qdrant_client()
+    +         client.get_collections()
+    +         return {"qdrant": "ok"}
+    +     except Exception as e:
+    +         raise HTTPException(status_code=500, detail=str(e))
+    ```
+
+  * Restarting the backend:
+
+    ```cmd
+    uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+    ```
+
+  * And going to ``http://localhost:6333/collections
+`` in the browser, I can successfully see:
+
+    ```json
+    {"result":{"collections":[{"name":"documents_embeddings"}]},"status":"ok","time":4.501e-6}
+    ```
+
+  * So we've successfully created a dedicated collection with cosine distance and fixed vector size aligned to OpenAI embeddings.
+
+  </details>
+
+* <details><summary>New folder structure</summary>
+
+    ```
+    AI-Support-Agent/
+      ├── app/
+      │   ├── main.py
+      │   ├── config.py
+      │   ├── middleware/
+      │   │   └── logging.py
+      │   ├── services/
+      │   │   ├── file_storage.py
+      │   │   ├── pdf_service.py
+      │   │   └── document_repository.py
+      │   ├── storage/
+      │   │   └── pdfs/
+      │   ├── core/
+      │   │   └── errors.py
+      │   ├── routers/
+      │   │   ├── health.py
+      │   │   ├── pdf_upload.py
+      │   │   ├── pdf_extract.py
+      │   │   └── qdrant_health.py    <-- NEW
+      │   └── db/
+      │       ├── mongodb.py
+      │       └── qdrant.py           <-- NEW
+      ├── qdrant_data/
+      │   ├── ...
+      │   └── collections/
+      │       └── documents_embeddings/
+      │           └── ...
+      ├── .env
+      ├── .gitignore
+      ├── requirements.txt
+      └── README.md
+    ```
+  </details>
+
+</details>
+
 
 <!--
 <details><summary> Day N </summary>
@@ -1173,6 +1415,36 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 
   ...
 
+  </details>
+  
+* <details><summary>New folder structure</summary>
+
+    ```
+    AI-Support-Agent/
+      ├── app/
+      │   ├── main.py
+      │   ├── config.py
+      │   ├── middleware/
+      │   │   └── logging.py
+      │   ├── services/
+      │   │   ├── file_storage.py
+      │   │   ├── pdf_service.py
+      │   │   └── document_repository.py   <-- NEW
+      │   ├── storage/
+      │   │   └── pdfs/
+      │   ├── core/
+      │   │   └── errors.py
+      │   ├── routers/
+      │   │   ├── health.py
+      │   │   ├── pdf_upload.py
+      │   │   └── pdf_extract.py
+      │   └── db/
+      │       └── mongodb.py                <-- NEW
+      ├── .env
+      ├── .gitignore
+      ├── requirements.txt
+      └── README.md
+    ```
   </details>
 
 </details>
