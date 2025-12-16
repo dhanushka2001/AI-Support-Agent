@@ -2,3 +2,4 @@
 **/*.pyc
 .env
 app/storage/
+qdrant_data/
