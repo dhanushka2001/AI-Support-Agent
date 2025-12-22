@@ -10,8 +10,9 @@ class Settings(BaseSettings):
     MONGODB_URI: str
     MONGODB_DB: str
 
-    # Later you can add:
-    # OPENAI_API_KEY: str
+    OPENAI_API_KEY: str
+    
+    # Later can add:
     # DB_URL: str
 
     model_config = SettingsConfigDict(

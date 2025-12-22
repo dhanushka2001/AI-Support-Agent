@@ -6,3 +6,4 @@ pdfplumber
 pillow
 pymongo>=4.6
 qdrant-client
+openai>=1.0.0

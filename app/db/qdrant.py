@@ -16,15 +16,14 @@ def get_qdrant_client() -> QdrantClient:
 
 
 def create_collection_if_not_exists():
-    client = get_qdrant_client()
-
-    collections = client.get_collections().collections
+    qdrant_client = get_qdrant_client()
+    collections = qdrant_client.get_collections().collections
     existing_names = {c.name for c in collections}
 
     if COLLECTION_NAME in existing_names:
         return  # already exists
 
-    client.create_collection(
+    qdrant_client.create_collection(
         collection_name=COLLECTION_NAME,
         vectors_config=VectorParams(
             size=VECTOR_SIZE,

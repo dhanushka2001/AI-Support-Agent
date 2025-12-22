@@ -35,3 +35,12 @@ def store_extracted_text(file_id: str, text: str):
 
     if result.matched_count == 0:
         raise ValueError("Document not found")
+
+
+def get_document_text(file_id: str) -> str | None:
+    doc = documents_collection.find_one(
+        {"file_id": file_id},
+        {"extracted_text": 1}
+    )
+    return doc.get("extracted_text") if doc else None
+

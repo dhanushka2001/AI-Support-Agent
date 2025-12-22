@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from dotenv import load_dotenv
+load_dotenv() # Load the environment variables
 
 from app.config import settings
 from app.middleware.logging import LoggingMiddleware
@@ -8,8 +10,8 @@ from app.routers.health import router as health_router
 from app.routers.pdf_upload import router as pdf_upload_router
 from app.routers.pdf_extract import router as pdf_extract_router
 from app.routers.qdrant_health import router as qdrant_health_router
+from app.routers.embeddings import router as embeddings_router
 from app.db.qdrant import create_collection_if_not_exists
-
 
 app = FastAPI(
     title="AI Support Agent",
@@ -50,6 +52,7 @@ app.include_router(health_router)
 app.include_router(pdf_upload_router)
 app.include_router(pdf_extract_router)
 app.include_router(qdrant_health_router)
+app.include_router(embeddings_router)
 
 
 @app.get("/")

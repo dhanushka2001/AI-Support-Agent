@@ -1,7 +1,7 @@
 # AI-Support-Agent
 
 ## Progress updates 
-<details><summary>Day 1 - 03/12/25</summary>
+<details><summary> Day 1 - 03/12/25 </summary>
   
 ## Day 1 - 03/12/25
 * Created main application entry point in ``app/main.py``.
@@ -33,7 +33,7 @@
 * Using ``fastapi dev main.py`` to load the web API. Accessible via ``http://127.0.0.1:8000/``, ``http://127.0.0.1:8000/health/``, and  ``http://127.0.0.1:8000/docs#/`` (which uses Swagger UI).
 </details>
 
-<details><summary>Day 2 - 04/12/25</summary>
+<details><summary> Day 2 - 04/12/25 </summary>
   
 ## Day 2 - 04/12/25
 * Configured CORSMiddleware to support future frontend interactions and manage app settings cleanly.[^3]
@@ -1405,6 +1405,254 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 
 </details>
 
+<details><summary> Day 7 - 20/12/25 </summary>
+
+## Day 7 - 20/12/25
+
+* <details><summary> Generate Embeddings and Store Vectors in Qdrant </summary>
+
+  <!--
+  * In ``app/db/qdrant.py`` I switched back to the simpler singleton client rather than a ``get_qdrant_client()`` function.
+ 
+    ``app/db/qdrant.py``:
+
+    ```diff
+    QDRANT_HOST = "localhost"
+    QDRANT_PORT = 6333
+    
+    - def get_qdrant_client() -> QdrantClient:
+    - return QdrantClient(
+    -     host=QDRANT_HOST,
+    -     port=QDRANT_PORT,
+    - )
+    
+    + qdrant_client = QdrantClient(
+    +     host=QDRANT_HOST,
+    +     port=QDRANT_PORT,
+    + )
+    ```
+  -->
+
+  * In ``.env`` I added the OpenAI key, ``OPENAI_API_KEY=sk-xxxx``.[^20]
+
+     [^20]: Developer quickstart | OpenAI API, https://platform.openai.com/docs/quickstart?desktop-os=windows
+
+  * Added ``openai>=1.0.0`` to ``requirements.txt``.
+  * Added to ``main.py``:
+ 
+    ```py
+    from dotenv import load_dotenv
+    load_dotenv() # Load the environment variables
+    ```
+
+  * Added a function, ``get_document_text()`` to ``document_repository.py``:
+ 
+    ```py
+    def get_document_text(file_id: str) -> str | None:
+        doc = documents_collection.find_one(
+            {"file_id": file_id},
+            {"extracted_text": 1}
+        )
+        return doc.get("extracted_text") if doc else None
+    ```
+
+  * Created ``app/services/embedding_service.py``:
+ 
+    ```py
+    import uuid
+    
+    from openai import OpenAI
+    from app.db.qdrant import get_qdrant_client
+    
+    client = OpenAI()
+    
+    CHUNK_SIZE = 800
+    CHUNK_OVERLAP = 100
+    EMBEDDING_MODEL = "text-embedding-3-small"
+    
+    
+    def chunk_text(text: str):
+        chunks = []
+        start = 0
+    
+        while start < len(text):
+            end = start + CHUNK_SIZE
+            chunks.append(text[start:end])
+            start += CHUNK_SIZE - CHUNK_OVERLAP
+    
+        return chunks
+    
+    
+    def embed_and_store(file_id: str, text: str):
+        chunks = chunk_text(text)
+
+        qdrant_client = get_qdrant_client()
+    
+        embeddings = client.embeddings.create(
+            model=EMBEDDING_MODEL,
+            input=chunks
+        )
+    
+        points = []
+        for idx, emb in enumerate(embeddings.data):
+            points.append({
+                "id": str(uuid.uid4()),
+                "vector": emb.embedding,
+                "payload": {
+                    "file_id": file_id,
+                    "chunk_index": idx,
+                    "text": chunks[idx],
+                }
+            })
+    
+        qdrant_client.upsert(
+            collection_name="documents_embeddings",
+            points=points
+        )
+    
+        return len(points)
+    ```
+
+  * Created ``app/routers/embeddings.py``:
+ 
+    ```py
+    from fastapi import APIRouter, HTTPException
+    from app.services.document_repository import get_document_text
+    from app.services.embedding_service import embed_and_store
+    
+    router = APIRouter(prefix="/embeddings", tags=["Embeddings"])
+    
+    
+    @router.post("/{file_id}")
+    def generate_embeddings(file_id: str):
+        text = get_document_text(file_id)
+        if not text:
+            raise HTTPException(status_code=404, detail="No extracted text found")
+    
+        count = embed_and_store(file_id, text)
+    
+        return {
+            "file_id": file_id,
+            "chunks_embedded": count
+        }
+    ```
+
+  * Then registered the router in ``main.py``:
+ 
+    ```py
+    from app.routers.embeddings import router as embeddings_router
+    app.include_router(embeddings_router)
+    ```
+
+  * Restarting Docker Desktop, then running ``docker start qdrant``, and finally starting FastAPI with ``uvicorn app.main:app --reload --host 127.0.0.1 --port 8000``, I can see ``POST /embeddings/{file_id}`` in SwaggerUI. Entering a valid file ID gives me this response:
+ 
+    ```json
+    {
+      "file_id": "27ff3caa-2fbc-4418-b16f-bbb0af29c4a9",
+      "chunks_embedded": 2
+    }
+    ```
+ 
+    which tells me that the PDF was successfully loaded, and ``"chunks_embedded": 2`` tells me that the PDF was split into 2 chunks. Each chunk was embedded using the OpenAI embedding model ``text-embedding-3-small``, and each embedding was stored in Qdrant.
+
+    When going to ``http://localhost:6333/collections/documents_embeddings``, I can see:
+
+    ```json
+    {
+      "result":{
+        "status":"green",
+        "optimizer_status":"ok",
+        "indexed_vectors_count":0,
+        "points_count":2,
+        "segments_count":2,
+        "config":{
+          "params":{
+            "vectors":{"size":1536,"distance":"Cosine"},
+            "shard_number":1,
+            "replication_factor":1,
+            "write_consistency_factor":1,
+            "on_disk_payload":true
+          },
+          "hnsw_config":{"m":16,"ef_construct":100,"full_scan_threshold":10000,"max_indexing_threads":0,"on_disk":false},
+          "optimizer_config":{"deleted_threshold":0.2,"vacuum_min_vector_number":1000,"default_segment_number":0,"max_segment_size":null,"memmap_threshold":null,"indexing_threshold":10000,"flush_interval_sec":5,"max_optimization_threads":null},
+          "wal_config":{"wal_capacity_mb":32,"wal_segments_ahead":0,"wal_retain_closed":1},
+          "quantization_config":null
+        },
+        "payload_schema":{}
+      },
+      "status":"ok",
+      "time":0.000322229
+    }
+    ```
+
+    ``"points_count": 2`` tells me that 2 vectors exist, they are persisted, they belong to the documents_embeddings collection, and the collection is healthy (status: green). The ``text-embedding-3-small`` model produces a 1536-dimensional vector for each chunk (numeric representation of its semantic meaning), 2 chunks means 2 vectors.
+
+  * This all works fine, but I noticed that when I try generate embeddings for a PDF I've already used, it works and generates duplicate embeddings, ``"points_count"`` keeps increasing. The reason for this is that I set the ``"id"`` for the point in ``embed_and_store()`` in ``app/services/embedding_service.py`` to be ``str(uuid.uuid4())``. This creates a valid UUID but the problem is that it is unique even for duplicate PDFs, to make it deterministic, I tried doing ``f"{file_id}_{idx}"`` to make it deterministic, however I got an error saying it was not a valid UUID. The solution was to use uui5 like so:
+
+    ```py
+    points = []
+    for idx, emb in enumerate(embeddings.data):
+        base_uuid = uuid.UUID(file_id)
+        point_id = uuid.uuid5(base_uuid, str(idx))
+        
+        points.append({
+            # "id": str(uuid.uuid4()), # valid UUID but not deterministic
+            # "id": f"{file_id}_{idx}", # deterministic but not valid UUID
+            "id": str(point_id), # valid UUID and deterministic
+            "vector": emb.embedding,
+            "payload": {
+                "file_id": file_id,
+                "chunk_index": idx,
+                "text": chunks[idx],
+            }
+        })
+    ```
+
+    now when I try to generate embeddings for the same PDF, it rewrites the old one, instead of making duplicate embeddings.
+
+  * To delete the embeddings and start from scratch, I firstly did ``docker stop qdrant``, then deleted the ``/qdrant_data`` folder (will get automatically recreated), then ran ``docker start qdrant``, and finally restarted FastAPI by doing ``uvicorn app.main:app --reload``. In ``http://localhost:6333/collections`` I can see:
+ 
+    ```
+    {"result":{"collections":[{"name":"documents_embeddings"}]},"status":"ok","time":4.6e-6}
+    ```
+
+    and in ``http://localhost:6333/collections/documents_embeddings`` I can see ``"points_count"0``. When I generate embeddings for a PDF it now says ``"points_count":2``, and when I try to generate embeddings again for the same PDF it stays at ``"points_count":2``.
+
+  </details>
+  
+* <details><summary>New folder structure</summary>
+
+    ```
+    AI-Support-Agent/
+      ├── app/
+      │   ├── main.py
+      │   ├── config.py
+      │   ├── middleware/
+      │   │   └── logging.py
+      │   ├── services/
+      │   │   ├── file_storage.py
+      │   │   ├── pdf_service.py
+      │   │   ├── document_repository.py
+      │   │   └── embedding_service.py       <-- NEW
+      │   ├── storage/
+      │   │   └── pdfs/
+      │   ├── core/
+      │   │   └── errors.py
+      │   ├── routers/
+      │   │   ├── health.py
+      │   │   ├── pdf_upload.py
+      │   │   ├── pdf_extract.py
+      │   │   └── embeddings.py              <-- NEW
+      │   └── db/
+      │       └── mongodb.py
+      ├── .env
+      ├── .gitignore
+      ├── requirements.txt
+      └── README.md
+    ```
+  </details>
+
+</details>
 
 <!--
 <details><summary> Day N </summary>
