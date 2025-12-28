@@ -2334,8 +2334,243 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 
 </details>
 
+<details><summary> Day 10 - 28/12/25 </summary>
+
+## Day 10 - 28/12/25
+
+* <details><summary> First Full Demo </summary>
+
+  * In the previous Day, I tested uploading a document, asking a question, and getting an answer.
+
+  </details>
+
+* <details><summary> Code Cleanup </summary>
+
+  * I have removed unused files and added comments where necessary.
+
+  </details>
+
+</details>
+
+<details><summary> Day 11 - 28/12/25 </summary>
+
+## Day 11 - 28/12/25
+
+* <details><summary> Simple Chat UI and Connect to Backend </summary>
+
+  * Verified that ``Node.js LTS`` is installed:
+ 
+    ```console
+    node -v
+    npm -v
+    ```
+
+  * Created the frontend (running from project root):
+ 
+    ```console
+    npm create vite@latest frontend -- --template react-ts
+    ```
+
+    which creates the ``frontend/`` folder. I selected "No" to "Use rolldown-vite (Experimental)?", and "Yes" to "Install with npm and start now?".
+
+    Equivalently, I could've manually done:
+
+    ```console
+    cd frontend
+    npm install  # first time only
+    npm run dev
+    ```
+
+  * Going to ``http://localhost:5173``, I can see the default Vite + React page.
+ 
+  * Updating ``frontend/src/App.tsx``:
+ 
+    ```tsx
+    import { useState } from "react";
+    
+    type Message = {
+      role: "user" | "assistant";
+      content: string;
+    };
+    
+    function App() {
+      const [messages, setMessages] = useState<Message[]>([]);
+      const [question, setQuestion] = useState("");
+      const [conversationId, setConversationId] = useState<string | null>(null);
+      const [loading, setLoading] = useState(false);
+    
+      const sendMessage = async () => {
+        if (!question.trim()) return;
+    
+        const userMessage: Message = { role: "user", content: question };
+        setMessages((prev) => [...prev, userMessage]);
+        setQuestion("");
+        setLoading(true);
+    
+        const body: any = {
+          question,
+          top_k: 5,
+        };
+    
+        if (conversationId) {
+          body.conversation_id = conversationId;
+        }
+    
+        const res = await fetch("http://localhost:8000/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+    
+        const data = await res.json();
+    
+        setConversationId(data.conversation_id);
+    
+        const assistantMessage: Message = {
+          role: "assistant",
+          content: data.answer,
+        };
+    
+        setMessages((prev) => [...prev, assistantMessage]);
+        setLoading(false);
+      };
+    
+      return (
+        <div style={{ maxWidth: 600, margin: "40px auto", fontFamily: "sans-serif" }}>
+          <h2>Chatbot</h2>
+    
+          <div style={{ border: "1px solid #ccc", padding: 12, minHeight: 300 }}>
+            {messages.map((m, i) => (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <strong>{m.role === "user" ? "You" : "AI"}:</strong>
+                <div>{m.content}</div>
+              </div>
+            ))}
+            {loading && <div>Thinking...</div>}
+          </div>
+    
+          <div style={{ display: "flex", marginTop: 10 }}>
+            <input
+              style={{ flex: 1, padding: 8 }}
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+            />
+            <button onClick={sendMessage} style={{ marginLeft: 8 }}>
+              Send
+            </button>
+          </div>
+        </div>
+      );
+    }
+    
+    export default App;
+    ```
+
+  * I can now see a simple input box titled "Chatbot" and a basic send button. After asking it a question related to one of the chunked and embedded PDFs, it gave a correct answer. And when asking a follow-up question that required context from the previous conversation, it correctly understood and output a correct response:
+ 
+    <img width="627" height="471" alt="image" src="https://github.com/user-attachments/assets/2531d7bb-4350-4601-b73c-5ec9b46c2bf1" />
+
+    Frontend sends ``POST /chat`` with basic fetch ``fetch("http://localhost:8000/chat", { ... })``, FastAPI responds with JSON, UI renders the answer.
+
+  * There is a ``Thinking...`` state UI to indicate the query response is being processed. Implemented with:
+
+    ```tsx
+    const [loading, setLoading] = useState(false);
+    ```
+
+    and
+
+    ```tsx
+    <button disabled={loading}>
+      {loading ? "Thinking..." : "Send"}
+    </button>
+    ```
+
+  * In MongoDB Atlas, in ``ai_support_agent/conversations/``, I can see the new conversation:
+ 
+    ```cmd 
+    _id: ObjectId('6951792c04fac433b03d0ca7')
+    conversation_id: "0f840df9-890b-4fa9-8edb-ae5ae0731436"
+    messages: Array (4)
+      0: Object
+        role: "user"
+        content: "What address do I send documents to be legalised?"
+        timestamp: 2025-12-28T18:38:42.424+00:00
+      1: Object
+        role: "assistant"
+        content: "You should send your documents and cover sheet via Royal Mail tracked …"
+        timestamp: 2025-12-28T18:38:42.468+00:00
+      2: Object
+        role: "user"
+        content: "Can you repeat the postcode and delivery service?"
+        timestamp: 2025-12-28T18:39:49.108+00:00
+      3: Object
+        role: "assistant"
+        content: "The postcode is MK11 9NS, and the delivery service is Royal Mail track…"
+        timestamp: 2025-12-28T18:39:49.147+00:00
+    created_at: 2025-12-28T18:38:36.027+00:00
+    updated_at: 2025-12-28T18:39:49.147+00:00
+
+  * Later I would like to implement conversation-switching to the frontend, to allow to user to switch between conversations or create a new conversation.
+  * I also notice that when refreshing the page, the conversation is reset. This is expected as we haven't implemented a feature to retrieve the last conversation from MongoDB yet.
+ 
+* <details><summary> New folder structure </summary>
+
+    ```
+    AI-Support-Agent/
+      ├── app/
+      │   ├── main.py
+      │   ├── config.py
+      │   ├── middleware/
+      │   │   └── logging.py
+      │   ├── services/
+      │   │   ├── file_storage.py
+      │   │   ├── pdf_service.py
+      │   │   ├── document_repository.py
+      │   │   └── embedding_service.py
+      │   │   ├── search_service.py
+      │   │   ├── chat_service.py
+      │   │   └── conversation_service.py
+      │   ├── storage/
+      │   │   └── pdfs/
+      │   ├── core/
+      │   │   ├── errors.py
+      │   │   └── embeddings.py
+      │   ├── routers/
+      │   │   ├── health.py
+      │   │   ├── pdf_upload.py
+      │   │   ├── pdf_extract.py
+      │   │   ├── qdrant_health.py
+      │   │   ├── embeddings.py
+      │   │   ├── search.py
+      │   │   └── chat.py
+      │   └── db/
+      │       ├── mongodb.py
+      │       └── qdrant.py
+      ├── qdrant_data/
+      │   └── ...
+      ├── frontend/                  <-- NEW
+      │   ├── node_modules/          <-- NEW
+      │   │   └── ...                <-- NEW
+      │   ├── public/                <-- NEW
+      │   │   └── ...                <-- NEW
+      │   ├── src/                   <-- NEW
+      │   │   ├── App.tsx            <-- NEW
+      │   │   └── ...                <-- NEW
+      │   └── ...
+      ├── .env
+      ├── .gitignore
+      ├── requirements.txt
+      └── README.md
+    ```
+  </details>
+
+
+</details>
+
 <!--
-<details><summary> Day N </summary>
+<details><summary> Day N - 05/12/25 </summary>
 
 ## Day N - 05/12/25
 
@@ -2360,7 +2595,8 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
       │   │   ├── document_repository.py
       │   │   └── embedding_service.py
       │   │   ├── search_service.py
-      │   │   └── chat_service.py            <-- NEW
+      │   │   ├── chat_service.py
+      │   │   └── conversation_service.py
       │   ├── storage/
       │   │   └── pdfs/
       │   ├── core/
@@ -2373,11 +2609,20 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
       │   │   ├── qdrant_health.py
       │   │   ├── embeddings.py
       │   │   ├── search.py
-      │   │   └── chat.py                    <-- NEW
+      │   │   └── chat.py
       │   └── db/
       │       ├── mongodb.py
       │       └── qdrant.py
       ├── qdrant_data/
+      │   └── ...
+      ├── frontend/                  <-- NEW
+      │   ├── node_modules/          <-- NEW
+      │   │   └── ...                <-- NEW
+      │   ├── public/                <-- NEW
+      │   │   └── ...                <-- NEW
+      │   ├── src/                   <-- NEW
+      │   │   ├── App.tsx            <-- NEW
+      │   │   └── ...                <-- NEW
       │   └── ...
       ├── .env
       ├── .gitignore
@@ -2390,6 +2635,7 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 -->
 
 ## Citations
+
 
 
 
