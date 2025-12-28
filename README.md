@@ -238,7 +238,7 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 ## Day 3 - 05/12/25
 * <details><summary>Enable users to upload a PDF file to the backend</summary>
   
-  * <details><summary>New folder structure</summary>
+  * <details><summary> New folder structure </summary>
 
     ```
     AI-Support-Agent/
@@ -388,7 +388,7 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 
 * <details><summary>Centralised error responses and validation rules</summary>
 
-  * <details><summary>New folder structure</summary>
+  * <details><summary> New folder structure </summary>
 
     ```
     AI-Support-Agent/
@@ -552,7 +552,7 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 
 ## Day 4 - 11/12/25
 
-  * <details><summary>New folder structure</summary>
+  * <details><summary> New folder structure </summary>
 
     ```
     AI-Support-Agent/
@@ -1131,7 +1131,7 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
     
   </details>
 
-* <details><summary>New folder structure</summary>
+* <details><summary> New folder structure </summary>
 
     ```
     AI-Support-Agent/
@@ -1366,7 +1366,7 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 
   </details>
 
-* <details><summary>New folder structure</summary>
+* <details><summary> New folder structure </summary>
 
     ```
     AI-Support-Agent/
@@ -1620,7 +1620,7 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 
   </details>
   
-* <details><summary>New folder structure</summary>
+* <details><summary> New folder structure </summary>
 
     ```
     AI-Support-Agent/
@@ -1642,9 +1642,13 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
       │   │   ├── health.py
       │   │   ├── pdf_upload.py
       │   │   ├── pdf_extract.py
+      │   │   ├── qdrant_health.py
       │   │   └── embeddings.py              <-- NEW
       │   └── db/
-      │       └── mongodb.py
+      │       ├── mongodb.py
+      │       └── qdrant.py
+      ├── qdrant_data/
+      │   └── ...
       ├── .env
       ├── .gitignore
       ├── requirements.txt
@@ -1919,6 +1923,7 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
       │   │   ├── file_storage.py
       │   │   ├── pdf_service.py
       │   │   ├── document_repository.py
+      │   │   ├── embedding_service.py
       │   │   └── search_service.py          <-- NEW
       │   ├── storage/
       │   │   └── pdfs/
@@ -1929,9 +1934,397 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
       │   │   ├── health.py
       │   │   ├── pdf_upload.py
       │   │   ├── pdf_extract.py
+      │   │   ├── qdrant_health.py
+      │   │   ├── embeddings.py
       │   │   └── search.py                  <-- NEW
       │   └── db/
-      │       └── mongodb.py
+      │       ├── mongodb.py
+      │       └── qdrant.py
+      ├── qdrant_data/
+      │   └── ...
+      ├── .env
+      ├── .gitignore
+      ├── requirements.txt
+      └── README.md
+    ```
+  </details>
+
+</details>
+
+<details><summary> Day 9 - 28/12/25 </summary>
+
+## Day 9 - 28/12/25
+
+* <details><summary> Chat Completion </summary>
+
+  * Created ``app/services/chat_service.py``:
+ 
+    ```py
+    from openai import OpenAI
+
+    client = OpenAI()
+    
+    MODEL = "gpt-4o-mini"
+    
+    SYSTEM_PROMPT = (
+        "You are an AI assistant that answers questions using ONLY the provided context. "
+        "If the answer is not contained in the context, say you do not know."
+    )
+    
+    def generate_answer(question: str, context_chunks: list[str]) -> str:
+        if not context_chunks:
+            return "I do not know based on the provided documents."
+    
+        context = "\n\n---\n\n".join(context_chunks)
+    
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": f"""
+    Context:
+    {context}
+    
+    Question:
+    {question}
+    """
+            },
+        ]
+    
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            temperature=0.2,  # lower = less creative, more factual
+        )
+    
+        return response.choices[0].message.content
+    ```
+
+  * And created its accompanying router, ``app/router/chat.py``:
+ 
+    ```py
+    from fastapi import APIRouter, Query
+    from app.services.search_service import search_similar_chunks
+    from app.services.chat_service import generate_answer
+    
+    router = APIRouter(prefix="/chat", tags=["Chat"])
+    
+    
+    @router.post("")
+    def chat(
+        question: str = Query(..., min_length=3),
+        top_k: int = Query(3, ge=1, le=5),
+    ):
+        # 1. Retrieve relevant chunks
+        results = search_similar_chunks(question, top_k)
+    
+        chunks = [r["text"] for r in results]
+    
+        # 2. Generate answer
+        answer = generate_answer(question, chunks)
+    
+        return {
+            "question": question,
+            "answer": answer,
+            "chunks_used": len(chunks),
+        }
+    ```
+
+  * Hooked the router to ``main.py``:
+ 
+    ```py
+    from app.routers.chat import router as chat_router
+
+    app.include_router(chat_router)
+    ```
+
+  * I can now see the ``POST /chat`` endpoint in SwaggerUI (``http://127.0.0.1:8000/docs``).
+  * However, when I entered the prompt: "What causes the structure seen in Saturn’s rings according to the paper?" with ``top_k`` = 5, it just returned:
+ 
+    ```json
+    {
+      "question": "What causes the structure seen in Saturn’s rings according to the paper?",
+      "answer": "I do not know.",
+      "chunks_used": 5
+    }
+    ```
+
+  * My first guess was that the Saturn pdf was not embedded correctly, but I could see that it was as I had re-generated embeddings and could see ``points_count`` > 0 in ``http://localhost:6333/collections/documents_embeddings``.
+  * The issue was actually just that the ``SYSTEM_PROMPT`` in ``app/services/chat_service.py`` was too strict.
+  * I changed ``SYSTEM_PROMPT``:
+ 
+    ```diff
+    - SYSTEM_PROMPT = (
+    -     "You are an AI assistant that answers questions using ONLY the provided context. "
+    -     "If the answer is not contained in the context, say you do not know."
+    - )
+    
+    + SYSTEM_PROMPT = (
+    +     "You are an AI assistant answering questions based on the provided context from a document. "
+    +     "Use the context to infer and summarize the answer when possible. "
+    +     "If the context does not contain enough information to answer, say you do not know."
+    + )
+    ```
+
+    and now when I enter the prompt: "What causes the structure seen in Saturn’s rings according to the paper?" with ``top_k`` = 5 into ``POST /chat`` it returns:
+
+    ```json
+    {
+      "question": "What causes the structure seen in Saturn’s rings according to the paper?",
+      "answer": "The structure seen in Saturn's rings is influenced by various factors, including the gravitational effects of nearby moonlets, as indicated by the work of Murray et al. (2008) and other studies. Additionally, the formation of structures such as \"braids\" in the F Ring is discussed by Lissauer and Peale (1986), while the role of shepherding satellites in maintaining sharp edges and other features in the rings is highlighted by Borderies et al. (1982) and others. Overall, gravitational interactions and the dynamics of ring particles play a significant role in shaping the structure of Saturn's rings.",
+      "chunks_used": 5
+    }
+    ```
+
+  * This is a good response, however I notice that it does not mention "resonances" in its answer for "What causes the structure seen in Saturn’s rings according to the paper?", which is one of the main reasons and is mentioned in the PDF. We can fix that later with better chunk selection / re-ranking.
+    
+  </details>
+
+* <details><summary> Multi-Turn Conversation Handling </summary>
+
+  * Added ``app/services/conversation_service.py``:
+ 
+    ```py
+    from datetime import datetime
+    from uuid import uuid4
+    from app.db.mongodb import db
+    
+    
+    MAX_MESSAGES = 10  # keep last N messages total
+    
+    
+    def create_conversation() -> str:
+        conversation_id = str(uuid4())
+        db.conversations.insert_one({
+            "conversation_id": conversation_id,
+            "messages": [],
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        })
+        return conversation_id
+    
+    
+    def get_messages(conversation_id: str) -> list[dict]:
+        convo = db.conversations.find_one(
+            {"conversation_id": conversation_id},
+            {"_id": 0, "messages": 1}
+        )
+        return convo["messages"] if convo else []
+    
+    
+    def add_message(conversation_id: str, role: str, content: str):
+        db.conversations.update_one(
+            {"conversation_id": conversation_id},
+            {
+                "$push": {
+                    "messages": {
+                        "$each": [{
+                            "role": role,
+                            "content": content,
+                            "timestamp": datetime.utcnow(),
+                        }],
+                        "$slice": -MAX_MESSAGES,
+                    }
+                },
+                "$set": {"updated_at": datetime.utcnow()},
+            },
+            upsert=True,
+        )
+    ```
+
+    specifing ``MAX_MESSAGES = 10`` limits the memory window to the last 10 messages (5 from the user, 5 from the AI).
+
+  * Updated ``app/routers/chat.py``:
+ 
+    ```diff
+    - from fastapi import APIRouter, Query
+    + from fastapi import APIRouter
+    + from pydantic import BaseModel
+    + from typing import Optional
+    
+      from app.services.search_service import search_similar_chunks
+      from app.services.chat_service import generate_answer
+    + from app.services.conversation_service import (
+          create_conversation,
+          get_messages,
+          add_message,
+      )
+    
+      router = APIRouter(prefix="/chat", tags=["Chat"])
+      
+    + class ChatRequest(BaseModel):
+    +     question: str
+    +     top_k: int = 5
+    +     conversation_id: Optional[str] = None
+
+    
+      @router.post("")
+    - def chat(
+    -     question: str = Query(..., min_length=3),
+    -     top_k: int = Query(3, ge=1, le=5),
+    - ):
+    -     # 1. Retrieve relevant chunks
+    -     results = search_similar_chunks(question, top_k)
+    - 
+    -     chunks = [r["text"] for r in results]
+    - 
+    -     # 2. Generate answer
+    -     answer = generate_answer(question, chunks)
+    - 
+    -     return {
+    -         "question": question,
+    -         "answer": answer,
+    -         "chunks_used": len(chunks),
+    -     }
+    + def chat(request: ChatRequest):
+    + # 1. Create or reuse conversation
+    + conversation_id = request.conversation_id
+    + if not conversation_id:
+    +     conversation_id = create_conversation()
+    +
+    + # 2. Load previous messages
+    + previous_messages = get_messages(conversation_id)
+    +
+    + # 3. Vector search
+    + search_results = search_similar_chunks(
+    +     request.question,
+    +     top_k=request.top_k,
+    + )
+    +
+    + context_chunks = [r["text"] for r in search_results]
+    +
+    + # 4. Generate answer
+    + answer = generate_answer(
+    +     question=request.question,
+    +     context_chunks=context_chunks,
+    + )
+    +
+    + # 5. Store messages
+    + add_message(conversation_id, "user", request.question)
+    + add_message(conversation_id, "assistant", answer)
+    +
+    + # 6. Return response
+    + return {
+    +     "conversation_id": conversation_id,
+    +     "question": request.question,
+    +     "answer": answer,
+    +     "chunks_used": len(context_chunks),
+    + }
+    ```
+
+  * Now in SwaggerUI, ``POST /chat`` is a single input box to paste a JSON-formatted request, rather than input parameters.
+  * When I click "Try it now" and edit the input box to be:
+ 
+    ```json
+    {
+      "question": "What causes the structure of Saturn’s rings?",
+      "top_k": 5
+    }
+    ```
+
+    and click "Execute", it outputs:
+
+    ```json
+    {
+      "conversation_id": "e90daf47-2d73-4211-9ee0-76864312225c",
+      "question": "What causes the structure of Saturn’s rings?",
+      "answer": "The structure of Saturn's rings is influenced by various factors, including gravitational interactions with nearby moons, the dynamics of ring particles, and the effects of resonances. For example, studies have shown that moonlets, such as Prometheus, create structure in Saturn's F Ring through their gravitational influence. Additionally, the formation of features like \"braids\" and the Cassini Division can be attributed to gravitational perturbations and the stability of the ring particles. The dynamics of the particles, including their distribution and interactions, also play a crucial role in shaping the rings' structure.",
+      "chunks_used": 5
+    }
+    ```
+
+    and when I then input (using the ``conversation_id`` above):
+
+    ```json
+    {
+      "question": "What role do resonances play?",
+      "top_k": 5,
+      "conversation_id": "e90daf47-2d73-4211-9ee0-76864312225c"
+    }
+    ```
+
+    it outputs:
+
+    ```json
+    {
+      "conversation_id": "e90daf47-2d73-4211-9ee0-76864312225c",
+      "question": "What role do resonances play?",
+      "answer": "Resonances play a crucial role in the dynamics of Saturn's ring system by influencing the orbits of ring particles. They occur when the gravitational effects of moons interact with the particles in the rings, causing specific locations in the ring to experience increased acceleration. This leads to shifts in the orbits of the particles at resonance locations, which can result in the formation of gaps within the rings. For example, the 2:1 resonance with the moon Mimas creates the Huygen’s gap in the Cassini Division. Resonances depend on the stability of the moon's orbit; if the moon's orbit changes, the resonance location will also change, affecting the overall structure of the rings.",
+      "chunks_used": 5
+    }
+    ```
+
+    showing that it understood the context of the question from the earlier question in the conversation.
+  * Omitting ``conversation_id`` creates a new conversation.
+  * Providing an existing ``conversation_id`` resumes that conversation.
+
+  * In MongoDB Atlas I can see the new ``conversations`` collection, which has the current conversation saved:
+ 
+    ```shell
+    _id: ObjectId('69514c2d51d8879031f840e0')
+    conversation_id: "e90daf47-2d73-4211-9ee0-76864312225c"
+    messages: Array (4)
+      0: Object
+        role: "user"
+        content: "What causes the structure of Saturn’s rings?"
+        timestamp: 2025-12-28T15:26:43.037+00:00
+      1: Object
+        role: "assistant"
+        content: "The structure of Saturn's rings is influenced by various factors, incl…"
+        timestamp: 2025-12-28T15:26:43.072+00:00
+      2: Object
+        role: "user"
+        content: "What role do resonances play?"
+        timestamp: 2025-12-28T15:28:10.931+00:00
+      3: Object
+        role: "assistant"
+        content: "Resonances play a crucial role in the dynamics of Saturn's ring system…"
+        timestamp: 2025-12-28T15:28:10.966+00:00
+    created_at: 2025-12-28T15:26:37.043+00:00
+    updated_at: 2025-12-28T15:28:10.966+00:00
+    ```
+
+    which means chat history is persistant (I can continue the same conversation from another machine, so long as I know the ``conversation_id``. In practice, the website could provide a list of current ``conversation_id``'s instead of the user needing to remember/store them.
+
+  * One thing I could add later is a way to delete conversations from memory by providing the ``conversation_id``.
+
+  </details>
+  
+* <details><summary> New folder structure </summary>
+
+    ```
+    AI-Support-Agent/
+      ├── app/
+      │   ├── main.py
+      │   ├── config.py
+      │   ├── middleware/
+      │   │   └── logging.py
+      │   ├── services/
+      │   │   ├── file_storage.py
+      │   │   ├── pdf_service.py
+      │   │   ├── document_repository.py
+      │   │   └── embedding_service.py
+      │   │   ├── search_service.py
+      │   │   ├── chat_service.py            <-- NEW
+      │   │   └── conversation_service.py    <-- NEW
+      │   ├── storage/
+      │   │   └── pdfs/
+      │   ├── core/
+      │   │   ├── errors.py
+      │   │   └── embeddings.py
+      │   ├── routers/
+      │   │   ├── health.py
+      │   │   ├── pdf_upload.py
+      │   │   ├── pdf_extract.py
+      │   │   ├── qdrant_health.py
+      │   │   ├── embeddings.py
+      │   │   ├── search.py
+      │   │   └── chat.py                    <-- NEW
+      │   └── db/
+      │       ├── mongodb.py
+      │       └── qdrant.py
+      ├── qdrant_data/
+      │   └── ...
       ├── .env
       ├── .gitignore
       ├── requirements.txt
@@ -1953,7 +2346,7 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
   </details>
   
 * <details><summary> New folder structure </summary>
-
+    !! USE THE LAST FOLDER STRUCTURE NOT THIS ONE !!
     ```
     AI-Support-Agent/
       ├── app/
@@ -1964,17 +2357,28 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
       │   ├── services/
       │   │   ├── file_storage.py
       │   │   ├── pdf_service.py
-      │   │   └── document_repository.py   <-- NEW
+      │   │   ├── document_repository.py
+      │   │   └── embedding_service.py
+      │   │   ├── search_service.py
+      │   │   └── chat_service.py            <-- NEW
       │   ├── storage/
       │   │   └── pdfs/
       │   ├── core/
-      │   │   └── errors.py
+      │   │   ├── errors.py
+      │   │   └── embeddings.py
       │   ├── routers/
       │   │   ├── health.py
       │   │   ├── pdf_upload.py
-      │   │   └── pdf_extract.py
+      │   │   ├── pdf_extract.py
+      │   │   ├── qdrant_health.py
+      │   │   ├── embeddings.py
+      │   │   ├── search.py
+      │   │   └── chat.py                    <-- NEW
       │   └── db/
-      │       └── mongodb.py                <-- NEW
+      │       ├── mongodb.py
+      │       └── qdrant.py
+      ├── qdrant_data/
+      │   └── ...
       ├── .env
       ├── .gitignore
       ├── requirements.txt
@@ -1986,5 +2390,6 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 -->
 
 ## Citations
+
 
 

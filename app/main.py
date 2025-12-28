@@ -12,6 +12,7 @@ from app.routers.pdf_extract import router as pdf_extract_router
 from app.routers.qdrant_health import router as qdrant_health_router
 from app.routers.embeddings import router as embeddings_router
 from app.routers.search import router as search_router
+from app.routers.chat import router as chat_router
 from app.db.qdrant import create_collection_if_not_exists
 
 app = FastAPI(
@@ -55,6 +56,7 @@ app.include_router(pdf_extract_router)
 app.include_router(qdrant_health_router)
 app.include_router(embeddings_router)
 app.include_router(search_router)
+app.include_router(chat_router)
 
 
 @app.get("/")
