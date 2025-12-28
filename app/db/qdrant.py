@@ -1,11 +1,13 @@
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
+from app.core.embeddings import EMBEDDING_DIM
+
 
 QDRANT_HOST = "localhost"
 QDRANT_PORT = 6333
 
 COLLECTION_NAME = "documents_embeddings"
-VECTOR_SIZE = 1536  # OpenAI embedding dimension
+VECTOR_SIZE = EMBEDDING_DIM # OpenAI embedding dimension
 
 
 def get_qdrant_client() -> QdrantClient:

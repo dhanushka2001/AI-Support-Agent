@@ -1654,6 +1654,293 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 
 </details>
 
+<details><summary> Day 8 - 25/12/25 </summary>
+
+## Day 8 - 25/12/25
+
+* <details><summary> Setting up the project in Arch Linux on my laptop </summary>
+
+  * In order to setup the project in Arch Linux on my laptop I simply cloned the repo, and installed the necessary prerequisites:
+
+    ```console
+    sudo pacman -S python docker docker-compose git
+    ```
+
+  * Enable Docker:
+ 
+    ```console
+    sudo systemctl enable docker
+    sudo systemctl start docker
+    ```
+
+    running:
+
+    ```console
+    systemctl status docker
+    ```
+
+    I can see:
+
+    ```console
+    Active: active (running)
+    ```
+
+    In order to use certain Docker commands, I needed to add my user to the docker group:
+
+    ```console
+    sudo usermod -aG docker $USER
+    ```
+
+    and reboot.
+
+    
+
+  * Created a virtual environment:
+ 
+    ```console
+    python -m venv .venv
+    source .venv/bin/activate
+    ```
+
+    and verifying with:
+
+    ```console
+    echo $VIRTUAL_ENV
+    ```
+
+  * Installed Python deps:
+ 
+    ```console
+    pip install -r requirements.txt
+    ```
+
+  * Copied the .env file from my PC to my laptop (never pushed to Git):
+ 
+    ```env
+    OPENAI_API_KEY=sk-...
+    MONGODB_URI=...
+    ENVIRONMENT=development
+    ```
+
+  * Started MongoDB Atlas (ensuring laptop IP is allowed)
+  * Started Qdrant (local to laptop):
+ 
+    ```console
+    docker run -d --name qdrant -p 6333:6333 -v $(pwd)/qdrant_data:/qdrant/storage qdrant/qdrant
+    ```
+
+  and verifying with ``docker ps``. This creates the local ``qdrant_data/``.
+
+  * And lastly, restarted FastAPI:
+ 
+    ```console
+    uvicorn app.main:app --reload
+    ```
+
+  * I just noticed that the FastAPI website allows you to upload the same PDF multiple times, in the future I might fix it so that it doesn't let you upload the same PDF again.
+    
+  </details>
+
+* <details><summary> Vector Search Endpoint </summary>
+
+  * Created ``app/core/embeddings.py`` to centralize embedding settings which other files can access:
+ 
+    ```py
+    EMBEDDING_MODEL = "text-embedding-3-small"
+    EMBEDDING_DIM = 1536
+    ```
+
+    I found it useful using this ``grep`` command to recursively find all occurrences of the string "1536" in files in the project folder:[^21]
+
+    ```console
+    grep -r "1536" .
+    ```
+
+    [^21]: How to use "grep" command to find text including subdirectories, askubuntu.com, https://askubuntu.com/a/55333
+
+  * Created ``app/services/search_service.py``:
+ 
+    ```py
+    from openai import OpenAI
+    from qdrant_client.models import ScoredPoint
+    from app.db.qdrant import get_qdrant_client, COLLECTION_NAME
+    from app.core.embeddings import EMBEDDING_MODEL
+    
+    client = OpenAI()
+    
+    def search_similar_chunks(query: str, top_k: int = 5):
+        qdrant_client = get_qdrant_client()
+    
+        # 1. Embed the query
+        query_embedding = client.embeddings.create(
+            model=EMBEDDING_MODEL,
+            input=query
+        ).data[0].embedding
+    
+        # 2. Query Qdrant
+        results: list[ScoredPoint] = qdrant_client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=query_embedding,
+            limit=top_k,
+        ).points
+    
+        # 3. Shape response
+        return [
+            {
+                "score": point.score,
+                "file_id": point.payload["file_id"],
+                "chunk_index": point.payload["chunk_index"],
+                "text": point.payload["text"],
+            }
+            for point in results
+        ]
+    ```
+
+    I was having trouble getting this set up but the mistake was that I was not using the correct Qdrant function to do searching. For the latest version of Qdrant, the correct function is ``.query_points(...)``.[^22]
+
+    [^22]: Search - Qdrant, https://qdrant.tech/documentation/concepts/search/
+
+  * Created the router, ``app/routers/search.py``, which uses the ``search_similar_chunks(query, top_k)`` function defined in ``search_service.py``:
+ 
+    ```py
+    from fastapi import APIRouter, HTTPException
+    from app.services.search_service import search_similar_chunks
+    
+    router = APIRouter(prefix="/search", tags=["Vector Search"])
+    
+    
+    @router.post("/")
+    def vector_search(query: str, top_k: int = 5):
+        try:
+            results = search_similar_chunks(query, top_k)
+            return {
+                "query": query,
+                "top_k": top_k,
+                "results": results
+            }
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    ```
+
+  * As I am now on my laptop, it has its own local ``qdrant_data/`` folder with its own embeddings.
+  * After generating embeddings for PDFs saved already in MongoDB Atlas, and verifying by checking that ``points_count`` > 0 in ``http://localhost:6333/collections/documents_embeddings
+``, I entered the query "Saturn's rings" into Vector Search ``POST /search/`` and set ``top_k`` to 5, which returned:
+ 
+    ```json
+    {
+      "query": "Saturn's rings",
+      "top_k": 5,
+      "results": [
+        {
+          "score": 0.68428075,
+          "file_id": "bcba93d7-8f17-4809-8598-53b9a0f5d96d",
+          "chunk_index": 11,
+          "text": "’s rings are\nsymmetrical, splitting the rings into a small patch would allow for a higher particle\ndensity and pickup more moon interactions. The Patch method (shown below in Figure\n6) is another way for computing Saturn’s rings without modeling the whole entire\nsystem. Ring particles are now distributed within the patch area which is determined by\nthe angle Δθ. The particles orbit Saturn moving downward, when a particle exceeds the\npatch boundary it is rotated by the angle Δθ to the top of the patch. Each particle has a\ncounter that gets incremented when that particle gets ‘reset’. This counter allows the\nprogram to be able to compute the actual position of the particle as if it were normally\norbiting Saturn. The moons orbit normally around Saturn.\n8\nFigure 6: Diagram of the patch method,"
+        },
+        {
+          "score": 0.6666744,
+          "file_id": "bcba93d7-8f17-4809-8598-53b9a0f5d96d",
+          "chunk_index": 40,
+          "text": "467. Print.\nEsposito, L. “Structure and Evolution of Saturn's Rings.” Icarus 67 (1986): 345-357.\nPrint.\nDones, L. “A Recent Cometary Origin for Saturn's Rings?” Icarus 92 (1991): 194-203.\nPrint.\nColwell, E. J. “ The disruption of planetary satellites and the creation of planetary\nrings.” Planet Space Sci. Vol 42, No. 12. (1994): 1139-1149. Print.\nMurray, C. D., Beurle, K., Cooper, J. N.., Evans, W. M.., Williams, A. G.., Charnoz, S..\n“The determination of the struction of Saturn's F ring by nearby moonlets.” Nature Vol.\n453. (2008). Print.\nHvoždara, M., Kohút, I. “Gravity field due to a homogeneous oblate spheroid: Simple\nsolution form and numerical calculations.” Contributions to Geophysics and Geodesy\nVol. 41/4 (2001): 307-327). Print.\nNdikilar, C., Usman, A., Meludu, O. “Gravitational S"
+        },
+        {
+          "score": 0.6467543,
+          "file_id": "bcba93d7-8f17-4809-8598-53b9a0f5d96d",
+          "chunk_index": 7,
+          "text": "individual ring particles randomly\ndistributed from Saturn’s D Ring to the edge of Saturn’s F ring which accounts for the\nvisible sections of the ring system. These particles orbit around Saturn using Newton's\nLaws of gravity and the Velocity Verlet method. My simulation currently treats 15 of the\nmost important moons. Due to the large force particles feel from Saturn, the moon\ninteractions are captured in separate R , V , and A arrays. If the moon\nmoon moon moon\ninteractions are included in the original R, V, and A arrays, their effects get essentially\nburied due to the large interaction from Saturn. This causes the moon effects to never\nadd up significantly (they are smaller than the numerical errors). Including moon\ninteractions in a separate array allows the simulation to pick up moon "
+        },
+        {
+          "score": 0.6463238,
+          "file_id": "bcba93d7-8f17-4809-8598-53b9a0f5d96d",
+          "chunk_index": 9,
+          "text": " the ring system changed as different moons were\nadded or subtracted. Most simulations were run with one million ring particles and a\none second time step. Figure 4 (below) compares a detailed photo of Saturn’s ring\nstructure with my 3D simulation results. Velocity magnitude is plotted, showing spikes\nwhich are due to interactions from the moons (labeled with the numbers). The five\nspikes on the right edge are due to moons that orbit within the ring. The other three\nspikes toward the middle of the ring are caused by resonances. The 2:1 resonance with\nMimas mentioned earlier is the largest resonance picked up by my simulation. These\nspikes from the moon interactions match up with the structure of Saturn’s ring which\nproves that my simulation is able to pickup large features of the ring syst"
+        },
+        {
+          "score": 0.6439747,
+          "file_id": "bcba93d7-8f17-4809-8598-53b9a0f5d96d",
+          "chunk_index": 43,
+          "text": "ordi, J., Criddle, K., Ionasescu, R., Jones, J., Mackenzie,\nR., Meek, M., Parcher, D., Pelletier, F., Owen, W. Jr., Roth, D., Roundhill, I., Stauch, J.\n“The Gravity Field of the Saturnian System From Satellite Observations and Spacecraft\nTracking Data.” The Astronomical Journal 132 (2006): 2520-2526. Print.\nCuzzi, J., Burns, J., Charnoz, S., Clark, R., Colwell, J., Dones. L., Esposito, L.,\nFilacchione, G., French, R., Hedman, M., Kempf, S., Marouf, E., Murray, C., Nicholson,\nP., Porco, C., Schmidt, J. Showalter, M., Spilker, L., Spitale, J., Srama, R., Sremčević,\nM., Tiscareno, M., Weiss, J. “An Evolving View of Saturn's Dynamic Rings.” Science\n327 (2010): 1470. Print.\nGoldreich, P., Tremaine, S. “The Dynamics of Planetary Rings.” Ann. Rev. Astron.\nAstrophys. 20 (1982):249-283. Print.\nMeye"
+        }
+      ]
+    }
+    ```
+
+  </details>
+
+* <details><summary> Simple Re-Ranking Thinking Task </summary>
+
+  1. Score threshold filtering (high priority)
+
+     * **Idea:** Discard results below a minimum similarity score (e.g. cosine similarity < 0.5)
+     * Vector search currently always returns results, even those which are weakly related. A threshold prevents irrelevant chunks being included.
+     * Could make the threshold adjustable.
+
+  2. Chunk-level re-ranking with keyword boosting
+
+     * **Idea:** Re-rank results by combining vector similarity score with keyword overlap between query and chunk text.
+     * Embeddings capture semantics but can miss exact terms (names, numbers, technical keywords). keyword overlap boosts precision.
+     * Light text matching (no NLP required).
+     * Hybrid scoring: ``final_score = 0.7 * vector_score + 0.3 * keyword_score``
+    
+  3. Document-level aggregation & de-duplication
+
+     * **Idea:** Group chunks by `file_id`` and avoid returning too many chunks from the same document.
+     * Prevents a single document from dominating results and improves answer diversity.
+     * Limit max chunks per document (e.g. 2-3).
+    
+     * Rank documents first, then chunks within them.
+
+  4. Recency bias
+
+     * **Idea:** Prefer newer documents when similarity scores are close.
+     * In real systems, newer documents often contain more relevant or updated information.
+     * Add a slight score boost for recency.
+     * Requires ``created_at``/``uploaded_at`` metadata.
+
+  5. Contextual chunk expansion (low priority)
+
+     * **Idea:** When a chunk is selected, also include adjacent chunks (``chunk_index ± 1``) for better context.
+     * PDF chunking can split important sentences across boundaries.
+     * Used only after top results are chosen.
+     * Expands conext without polluting retrieval stage.
+
+  </details>
+
+* <details><summary> New folder structure </summary>
+
+    ```
+    AI-Support-Agent/
+      ├── app/
+      │   ├── main.py
+      │   ├── config.py
+      │   ├── middleware/
+      │   │   └── logging.py
+      │   ├── services/
+      │   │   ├── file_storage.py
+      │   │   ├── pdf_service.py
+      │   │   ├── document_repository.py
+      │   │   └── search_service.py          <-- NEW
+      │   ├── storage/
+      │   │   └── pdfs/
+      │   ├── core/
+      │   │   ├── errors.py
+      │   │   └── embeddings.py              <-- NEW
+      │   ├── routers/
+      │   │   ├── health.py
+      │   │   ├── pdf_upload.py
+      │   │   ├── pdf_extract.py
+      │   │   └── search.py                  <-- NEW
+      │   └── db/
+      │       └── mongodb.py
+      ├── .env
+      ├── .gitignore
+      ├── requirements.txt
+      └── README.md
+    ```
+  </details>
+
+</details>
+
 <!--
 <details><summary> Day N </summary>
 
@@ -1665,7 +1952,7 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 
   </details>
   
-* <details><summary>New folder structure</summary>
+* <details><summary> New folder structure </summary>
 
     ```
     AI-Support-Agent/
@@ -1699,3 +1986,5 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 -->
 
 ## Citations
+
+

@@ -1,7 +1,7 @@
 import uuid
 from openai import OpenAI
 from app.db.qdrant import get_qdrant_client
-
+from app.core.embeddings import EMBEDDING_MODEL
 
 client = OpenAI()
 
@@ -9,7 +9,6 @@ client = OpenAI()
 COLLECTION_NAME = "documents_embeddings"
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
-EMBEDDING_MODEL = "text-embedding-3-small"
 
 
 def chunk_text(text: str):
