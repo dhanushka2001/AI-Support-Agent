@@ -9,6 +9,7 @@ from app.services.conversation_service import (
     get_conversation,
     add_message,
     get_latest_conversation,
+    list_conversations,
 )
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -28,7 +29,8 @@ def chat(request: ChatRequest):
         conversation_id = create_conversation()
 
     # 2. Load previous messages
-    previous_messages = get_conversation(conversation_id)
+    convo = get_conversation(conversation_id)
+    previous_messages = convo["messages"]
 
     # 3. Vector search
     search_results = search_similar_chunks(
@@ -70,5 +72,30 @@ def get_latest_chat():
     return {
         "conversation_id": conversation["conversation_id"],
         "messages": conversation["messages"][-10:],  # last 10 messages
+    }
+
+
+@router.get("/conversations")
+def get_conversations():
+    convs = list_conversations()
+    return [
+        {
+            "conversation_id": str(c["conversation_id"]),
+            "title": c.get("title", "New chat"),
+        }
+        for c in convs
+    ]
+
+
+@router.get("/{conversation_id}")
+def get_conversation_messages(conversation_id: str):
+    convo = get_conversation(conversation_id)
+
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    return {
+        "conversation_id": convo["conversation_id"],
+        "messages": convo["messages"],
     }
 

@@ -2679,6 +2679,220 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 
 </details>
 
+<details><summary> Day 13 - 29/12/25 </summary>
+
+## Day 13 - 29/12/25
+
+* <details><summary> Conversation List Sidebar </summary>
+
+  * I was successfully able to implement a sidebar that allows the user to switch between conversations, and start a new conversation.
+  * I firstly created a function, ``list_conversations()``, to return a list of the last 20 conversations in order of updated time, in JSON format with just their ``conversation_id`` and ``title``. The ``title`` of the conversation will just be the user's first input query truncated, later I could update this to be a more relevant generated title.
+  * I also created a function, ``get_conversation()`` to return a ``conversation_id``-specified conversation as a ``dict`` containing its ``conversation_id``, ``title``, and ``messages``.
+ 
+  * ``app/services/conversation_service.py``:
+ 
+    ```py
+    def list_conversations(limit: int = 20):
+        return list(
+            db.conversations.find(
+                {},
+                {
+                    "_id": 0,               # don't include MongoDB _id
+                    "conversation_id": 1,
+                    "title": 1,
+                }
+            )
+            .sort("updated_at", -1)
+            .limit(limit)
+        )
+
+    def get_conversation(conversation_id: str) -> list[dict]:
+        convo = db.conversations.find_one(
+            {"conversation_id": conversation_id},
+            {"_id": 0} # include everything except MongoDB _id
+        )
+        # return convo["messages"] if convo else []
+        return convo # could be None if not found
+    ```
+
+  * I then added the routers to accompany them in ``app/routers/chat.py``:
+
+    ```py
+    from app.services.conversation_service import (
+        create_conversation,
+        get_conversation,
+        add_message,
+        get_latest_conversation,
+        list_conversations,
+    )
+
+    router = APIRouter(prefix="/chat", tags=["Chat"])
+    
+    @router.get("/conversations")
+    def get_conversations():
+        convs = list_conversations()
+        return [
+            {
+                "conversation_id": str(c["conversation_id"]),
+                "title": c.get("title", "New chat"),
+            }
+            for c in convs
+        ]
+    
+    @router.get("/{conversation_id}")
+    def get_conversation_messages(conversation_id: str):
+        convo = get_conversation(conversation_id)
+    
+        if not convo:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    
+        return {
+            "conversation_id": convo["conversation_id"],
+            "messages": convo["messages"],
+        }
+    ```
+
+  * After verifying that the ``GET /chat/conversations`` and ``GET /chat/{conversation_id}`` endpoints work, I now needed to add the sidebar feature to the frontend.
+
+    ``frontend/src/App.tsx``:
+
+    ```tsx
+    type Conversation = {
+      conversation_id: string;
+      title?: string;
+    };
+
+    function App() {
+      ...
+      const [conversations, setConversations] = useState<Conversation[]>([]);
+
+      ...
+      useEffect(() => {
+        const loadConversations = async () => {
+          const res = await fetch("http://localhost:8000/chat/conversations");
+          const data = await res.json();
+          setConversations(data);
+        };
+      
+        loadConversations();
+      }, []);
+    
+      const startNewChat = () => {
+        setConversationId(null);
+        setMessages([]);
+      };
+    
+      const loadConversation = async (id: string) => {
+        setConversationId(id);
+        setMessages([]);
+        setLoading(true);
+    
+        const res = await fetch(`http://localhost:8000/chat/${id}`);
+        const data = await res.json();
+      
+        setMessages(data.messages);
+        setLoading(false);
+      };
+    ```
+ 
+  * Modified ``return(...)`` in ``App.tsx``:
+ 
+    ```tsx
+    return (
+      <div style={{ display: "flex", height: "100vh", fontFamily: "sans-serif" }}>
+        
+        {/* Sidebar */}
+        <div
+          style={{
+            width: 220,
+            borderRight: "1px solid #ddd",
+            padding: 10,
+            overflowY: "auto",
+          }}
+        >
+          <button
+            onClick={startNewChat}
+            style={{ width: "100%", marginBottom: 10 }}
+          >
+            + New Chat
+          </button>
+    
+          {conversations.map((c) => (
+            <div
+              key={c.conversation_id}
+              onClick={() => loadConversation(c.conversation_id)}
+              style={{
+                padding: "6px 8px",
+                cursor: "pointer",
+                background:
+                  c.conversation_id === conversationId ? "#aaa" : "transparent",
+              }}
+            >
+              {c.title || "New Chat"}
+            </div>
+          ))}
+        </div>
+    
+        {/* Chat panel */}
+        <div
+          style={{
+            flex: 1,
+            maxWidth: 700,
+            margin: "40px auto",
+            padding: "0 20px",
+          }}
+        >
+          <h2>Chatbot</h2>
+    
+          <div
+            style={{
+              border: "1px solid #ccc",
+              padding: 12,
+  	          width: 650,
+              height: 600,
+              overflowY: "auto",
+            }}
+          >
+            {messages.map((m, i) => (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <strong>{m.role === "user" ? "You" : "AI"}:</strong>
+                <div>{m.content}</div>
+              </div>
+            ))}
+            {loading && <div>Thinking...</div>}
+          </div>
+    
+          <div style={{ display: "flex", marginTop: 10 }}>
+            <input
+              style={{ flex: 1, padding: 8 }}
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+              disabled={loading}
+            />
+            <button
+              onClick={sendMessage}
+              style={{ marginLeft: 8 }}
+              disabled={loading}
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+    ```
+
+  * Here is the result:
+ 
+    <img width="960" height="919" alt="image" src="https://github.com/user-attachments/assets/eae52fdf-5448-4395-b2cf-20bedb19c997" />
+
+  * Next I would like to add a button to upload a PDF from the frontend. Could make it so the user is not allowed to upload the same PDF twice, and limit the size of the PDF. And add emotion detection with transformers sentiment models.
+
+  </details>
+
+</details>
+
 
 <!--
 <details><summary> Day N - 05/12/25 </summary>
