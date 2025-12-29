@@ -6,8 +6,9 @@ from app.services.search_service import search_similar_chunks
 from app.services.chat_service import generate_answer
 from app.services.conversation_service import (
     create_conversation,
-    get_messages,
+    get_conversation,
     add_message,
+    get_latest_conversation,
 )
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -27,7 +28,7 @@ def chat(request: ChatRequest):
         conversation_id = create_conversation()
 
     # 2. Load previous messages
-    previous_messages = get_messages(conversation_id)
+    previous_messages = get_conversation(conversation_id)
 
     # 3. Vector search
     search_results = search_similar_chunks(
@@ -53,5 +54,21 @@ def chat(request: ChatRequest):
         "question": request.question,
         "answer": answer,
         "chunks_used": len(context_chunks),
+    }
+
+
+@router.get("/latest")
+def get_latest_chat():
+    conversation = get_latest_conversation()
+
+    if not conversation:
+        return {
+            "conversation_id": None,
+            "messages": []
+        }
+
+    return {
+        "conversation_id": conversation["conversation_id"],
+        "messages": conversation["messages"][-10:],  # last 10 messages
     }
 

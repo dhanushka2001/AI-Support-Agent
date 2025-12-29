@@ -2566,8 +2566,119 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
     ```
   </details>
 
+</details>
+
+<details><summary> Day 12 - 29/12/25 </summary>
+
+## Day 12 - 29/12/25
+
+* <details><summary> Persistant Chat History </summary>
+
+  * In order to make chat history persistant, and query the latest conversation on page load, I just needed to add a function to ``app/services/conversation_service.py`` to pull the latest conversation from MongoDB:
+ 
+    ```py
+    def get_latest_conversation():
+    return db.conversations.find_one(
+        {},
+        sort=[("updated_at", -1)]
+    )
+    ```
+
+  * I then needed to add a ``GET /chat/latest`` endpoint to the router, ``app/routers/chat.py``, that uses that function:
+ 
+    ```py
+    from app.services.conversation_service import (
+      create_conversation,
+      get_conversation,
+      add_message,
+      get_latest_conversation,
+    )
+
+    @router.get("/latest")
+    def get_latest_chat():
+        conversation = get_latest_conversation()
+    
+        if not conversation:
+            return {
+                "conversation_id": None,
+                "messages": []
+            }
+    
+        return {
+            "conversation_id": conversation["conversation_id"],
+            "messages": conversation["messages"][-10:],  # last 10 messages
+        }
+    ```
+
+  * And lastly, update the frontend, ``frontend/src/App.tsx``:
+ 
+    ```tsx
+    import { useState, useEffect } from "react";
+
+    ...
+
+    function App() {
+      ...
+    
+      useEffect(() => {
+        const loadLatestConversation = async () => {
+          try {
+            const res = await fetch("http://localhost:8000/chat/latest");
+            const data = await res.json();
+      
+            if (data.conversation_id && data.messages) {
+              setConversationId(data.conversation_id);
+              setMessages(data.messages);
+            }
+          } catch (err) {
+            console.error("Failed to load latest conversation", err);
+          }
+        };
+      
+        loadLatestConversation();
+      }, []);
+
+      ...
+    }
+
+    export default App;
+    ```
+
+    adding one useEffect that runs on page load to call ``GET /chat/latest`` and hydrate ``conversationId`` and ``messages``. Put the ``useEffect(...);`` component inside ``App()``, just after the ``useState`` declarations.
+
+  * Now when I refresh the frontend website, ``http://localhost:5173/``, I can see the latest conversation preloaded.
+
+  </details>
+
+* <details><summary> Pagination/Scroll </summary>
+
+  * I still would like to add a feature that lets me switch conversations, and create a new conversation. I will try to implement that later.
+ 
+  * Currently the chatbox just grows taller to fit the new messages, I would prefer if the chatbox was a fixed size and was scrollable vertically, or split into pages. I prefer the ability to scroll, that does mean that all the messages would need to be loaded in, but since we're only saving the last 10 messages, that shouldn't be an issue.
+ 
+    <img width="1826" height="797" alt="chatbot" src="https://github.com/user-attachments/assets/e34e9ae4-5230-49f4-b4c2-91d79de5ec7f" />
+
+  * To make the chatbox scrollable, I simply had to replace one line in ``frontend/src/App.tsx``:
+ 
+    ```diff
+    - <div style={{ border: "1px solid #ccc", padding: 12, minHeight: 300 }}>
+    + <div style={{
+    +     border: "1px solid #ccc",
+    +     padding: 12,
+    +     height: 350,
+    +     overflowY: "auto",
+    +   }}
+    + >
+    ```
+
+  * The result:
+ 
+    <img width="614" height="512" alt="image" src="https://github.com/user-attachments/assets/41287058-4583-42a2-a693-dee2030c96f7" />
+
+  </details>
 
 </details>
+
 
 <!--
 <details><summary> Day N - 05/12/25 </summary>
@@ -2635,7 +2746,3 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 -->
 
 ## Citations
-
-
-
-

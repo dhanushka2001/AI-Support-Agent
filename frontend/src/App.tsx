@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 type Message = {
   role: "user" | "assistant";
@@ -10,6 +10,26 @@ function App() {
   const [question, setQuestion] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+
+  useEffect(() => {
+    const loadLatestConversation = async () => {
+      try {
+        const res = await fetch("http://localhost:8000/chat/latest");
+        const data = await res.json();
+  
+        if (data.conversation_id && data.messages) {
+          setConversationId(data.conversation_id);
+          setMessages(data.messages);
+        }
+      } catch (err) {
+        console.error("Failed to load latest conversation", err);
+      }
+    };
+  
+    loadLatestConversation();
+  }, []);
+
 
   const sendMessage = async () => {
     if (!question.trim()) return;
@@ -51,7 +71,13 @@ function App() {
     <div style={{ maxWidth: 600, margin: "40px auto", fontFamily: "sans-serif" }}>
       <h2>Chatbot</h2>
 
-      <div style={{ border: "1px solid #ccc", padding: 12, minHeight: 300 }}>
+      <div style={{
+          border: "1px solid #ccc",
+          padding: 12,
+          height: 350,
+          overflowY: "auto",
+      	}}
+      >
         {messages.map((m, i) => (
           <div key={i} style={{ marginBottom: 10 }}>
             <strong>{m.role === "user" ? "You" : "AI"}:</strong>

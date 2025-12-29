@@ -17,7 +17,7 @@ def create_conversation() -> str:
     return conversation_id
 
 
-def get_messages(conversation_id: str) -> list[dict]:
+def get_conversation(conversation_id: str) -> list[dict]:
     convo = db.conversations.find_one(
         {"conversation_id": conversation_id},
         {"_id": 0, "messages": 1}
@@ -43,3 +43,11 @@ def add_message(conversation_id: str, role: str, content: str):
         },
         upsert=True,
     )
+
+
+def get_latest_conversation():
+    return db.conversations.find_one(
+        {},
+        sort=[("updated_at", -1)]
+    )
+
