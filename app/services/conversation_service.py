@@ -28,17 +28,22 @@ def get_conversation(conversation_id: str) -> list[dict]:
     return convo # could be None if not found
 
 
-def add_message(conversation_id: str, role: str, content: str):
+def add_message(conversation_id: str, role: str, content: str, rewrite: str | None = None):
+    message = {
+        "role": role,
+        "content": content,
+        "timestamp": datetime.utcnow(),
+    }
+
+    if rewrite:
+        message["rewrite"] = rewrite
+
     db.conversations.update_one(
         {"conversation_id": conversation_id},
         {
             "$push": {
                 "messages": {
-                    "$each": [{
-                        "role": role,
-                        "content": content,
-                        "timestamp": datetime.utcnow(),
-                    }],
+                    "$each": [message],
                     "$slice": -MAX_MESSAGES,
                 }
             },

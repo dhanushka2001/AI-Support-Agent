@@ -2893,7 +2893,234 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
 
 </details>
 
+<details><summary> Day 14 - 30/12/25 </summary>
 
+## Day 14 - 30/12/25
+
+* <details><summary> Improved Context Strategy </summary>
+
+  * Currently, the previous messages aren't being used to influence the context chunks. E.g. when asking the question **"What causes the structure of Saturn's rings?"** and the follow-up question **"What role do resonances play?"**, the AI does not use the previous question at all to base its decision on the context chunks. Instead, it just looks for any chunks that are relevant to the question **"What role do resonances play?"**. The issue with this is that if I had a PDF on music, it could get confused with that and think any mention of musical resonances is related to my conversation on gravitational resonances in Saturn's rings.
+ 
+  * How the current pipeline works (steps 3-5 happen inside ``chat(request: ChatRequest)``):
+
+    * **Step 1:** User sends a message
+    * **Step 2:** ``chat(request: ChatRequest)`` in ``app/routers/chat.py`` is called (``ChatRequest`` is a class containing a ``question``, ``top_k``, and ``conversation_id`` (optional)).
+    * **Step 3:** Previous messages loaded
+    * **Step 4:** ``search_similar_chunks(request.question, request.top_k)`` (from ``app/services/search_service.py``)
+    * **Step 5:** ``generate_answer(request.question, context_chunks)`` (from ``app/services/chat_service.py``)
+   
+  * As you can see, the chunks searched (using OpenAI embedding model) are only given the new question, not the previous messages.
+And the generated answer (using gpt-4o-mini) is only given the new question and new searched chunks.
+  * One idea I was thinking of is search similar chunks with just the new question as normal, but then filter chunks which have a vector embedding not similar to the previous question's vector embedding.
+  * However, a better and standard approach is to rewrite the user's query with gpt-4o-mini, giving it the last 4 messages (2 from the user, 2 from the AI), and use this rewritten query for all future tasks (finding relevant context chunks, generating the AI response).
+  * It will be a good idea to store both the user's actual query and the rewritten query in MongoDB, so that the frontend displays the user's actual queries, but the backend uses the better AI-generated rewritten query.
+ 
+  * ``app/services/chat_service.py``:
+ 
+    ```py
+    def rewrite_query(question: str, previous_messages: list[dict]) -> str:
+        if not previous_messages:
+            return question
+    
+        # keep last 4 turns (2 from user, 2 from AI)
+        last_n_messages = previous_messages[-4:]
+    
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Rewrite the user's latest question into a fully self-contained "
+                    "question using the prior user questions as context. "
+                    "If the question is already self-contained, return it unchanged."
+                )
+            }
+        ]
+    
+        for message in last_n_messages:
+            messages.append({
+                "role": message["role"],
+                "content": message.get("rewrite", message["content"])
+            })
+    
+        # append the new question to the message history
+        messages.append({
+            "role": "user",
+            "content": question
+        })
+    
+        # generate the rewritten query with the message history context
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0,      # Zero-temperature rewriting
+        )
+    
+        return response.choices[0].message.content.strip()
+    ```
+
+  * ``app/services/conversation_service.py``:
+ 
+    ```py
+    def add_message(conversation_id: str, role: str, content: str, rewrite: str | None = None):
+        message = {
+            "role": role,
+            "content": content,
+            "timestamp": datetime.utcnow(),
+        }
+    
+        if rewrite:
+            message["rewrite"] = rewrite
+    
+        db.conversations.update_one(
+            {"conversation_id": conversation_id},
+            {
+                "$push": {
+                    "messages": {
+                        "$each": [message],
+                        "$slice": -MAX_MESSAGES,
+                    }
+                },
+                "$set": {"updated_at": datetime.utcnow()},
+            },
+            upsert=True,
+        )
+    ```
+
+  * ``app/routers/chat.py``:
+ 
+    ```py
+    def chat(request: ChatRequest):
+        # 1. Create or reuse conversation
+        conversation_id = request.conversation_id
+        if not conversation_id:
+            conversation_id = create_conversation()
+    
+        # 2. Load previous messages
+        convo = get_conversation(conversation_id)
+        previous_messages = convo["messages"]
+    
+        # 3. Rewrite query
+        rewritten_query = rewrite_query(
+            request.question,
+            previous_messages
+        )
+    
+        # 4. Vector search using rewritten query
+        search_results = search_similar_chunks(
+            rewritten_query,
+            top_k=request.top_k,
+        )
+        context_chunks = [r["text"] for r in search_results]
+    
+        # 5. Generate answer using rewritten query
+        answer = generate_answer(
+            question=rewritten_query,
+            context_chunks=context_chunks,
+        )
+    
+        # 6. Store new messages
+        rewrite = rewritten_query if rewritten_query != request.question else None
+        add_message(conversation_id, "user", request.question, rewrite)
+        add_message(conversation_id, "assistant", answer)
+    
+        # 7. Return response
+        return {
+            "conversation_id": conversation_id,
+            "question": request.question,
+            "rewrite": rewrite,
+            "answer": answer,
+            "chunks_used": len(context_chunks),
+        }
+    ```
+
+  * This worked in the backend, I can now see the new field ``"rewrite"`` in the user's follow-up query, containing a correctly rewritten query with contextual awareness:
+ 
+    ```cmd
+    conversation_id "06420279-383c-4e39-a8a9-3e03ab569701"
+    title: "New chat"
+    messages: Array (4)
+      0: Object
+        role: "user"
+        content: "What is the return delivery method?"
+        timestamp: 2025-12-30T16:03:36.870+00:00
+      1: Object
+        role: "assistant"
+        content: "The return delivery method involves arranging for the return of your d…"
+        timestamp: 2025-12-30T16:03:36.910+00:00
+      2: Object
+        role: "user"
+        content: "Convert the price to USD"
+        timestamp: 2025-12-30T16:03:58.196+00:00
+        rewrite: "What is the equivalent price in USD for the return delivery method that typically costs between £1 to £8?"
+      3: Object
+        role: "assistant"
+        content: "I do not know."
+        timestamp: 2025-12-30T16:03:58.252+00:00
+    created_at: 2025-12-30T16:03:32.346+00:00
+    updated_at: 2025-12-30T16:03:58.252+00:00
+    ```
+ 
+    <img width="960" height="920" alt="image" src="https://github.com/user-attachments/assets/f77a10dc-94c3-479a-b47f-125d53cb3de3" />
+
+
+  * However, as you can see, the AI assistant responded with **"I do not know"** when asked to perform a simple currency conversion.
+
+  * One reason for the issue could be that it was not able to find any relevant context chunks from the embedded PDFs:
+ 
+    ```py
+    def generate_answer(question: str, context_chunks: list[str]) -> str:
+        if not context_chunks:
+            return "I do not know based on the provided documents."
+    ```
+
+  * However, as it did not say that exact sentence, I can rule that out. Also, the current system will return the most relevant chunks, no matter how long the actual relevancy score is. And since there are more than 5 chunks, it is guaranteed that ``context_chunks`` will be non-empty.
+  * The issue was actually just that the ``SYSTEM_PROMPT`` was too strict still.
+  * Currently, ``SYSTEM_PROMPT`` reads:
+ 
+    ```py
+    SYSTEM_PROMPT = (
+        "You are an AI assistant answering questions based on the provided context from a document. "
+        "Use the context to infer and summarize the answer when possible. "
+        "If the context does not contain enough information to answer, say you do not know."
+    )
+    ```
+  * The issue with this is that, for user queries like: **"Convert the price to USD"**, the context chunks do not contain any information relevant to this query, as it is a simple query to convert currency.
+  * To fix this, I just had to update ``SYSTEM_PROMPT`` to be more lenient:
+ 
+    ```py
+    SYSTEM_PROMPT = (
+        "You are an AI assistant answering questions using the provided document context. "
+        "Use the context as the primary source of information. "
+        "If the question requires a simple transformation, calculation, or conversion "
+        "(such as currency conversion or unit conversion) based on values found in the context, "
+        "you may perform that transformation using general knowledge. "
+        "If the context does not provide any relevant information at all, say you do not know."
+    )
+    ```
+
+  * Which resulted in:
+ 
+    <img width="959" height="917" alt="image" src="https://github.com/user-attachments/assets/5d367f18-4bfe-457d-9e22-adcaca7429ed" />
+
+  * This is a better response than simply **"I do not know."**, although I would prefer if it was slightly more concise.
+  * One future improvement would be for the system to detect if the rewritten query contains words like "convert", "conversion", "equivalent", "how much is", "calculate", "total", etc., and to generate a response without using any context chunks. This would potentially save on token-usage as it means we don't have to pass entire context chunks, however, it might accidentally mistake retrieval queries for general queries. So for now I will opt not to make that change.
+ 
+  * By using rewritten queries and storing them in MongoDB, we are now able to succinctly preserve context without needing to pass the last 4 messages.
+
+  * So now when the system receives a new user query, it:
+    * rewrites the query based on the last 4 messages (2 user queries (will opt for the rewritten query if it exists) and 2 AI responses) and the user's actual query
+    * uses the contextually-aware rewritten query to find context chunks
+    * uses the contextually-aware rewritten query along with the context chunks to generate a response
+    * stores the new user query (actual), rewritten query, and AI response in MongoDB
+
+  * One other thing I do is store the context chunk ID's in MongoDB. This might be better than needing to search for context chunks for every new query, especially when the context remains the same. However, the user could easily change the subject, meaning that the context chunks would need to change. So for now I will stick to re-searching for context chunks with each new query.
+  * What I could add is a way for the chatbot to reference/cite the PDF they are sourcing their info from.
+
+  </details>
+
+</details>
+
+  
 <!--
 <details><summary> Day N - 05/12/25 </summary>
 
