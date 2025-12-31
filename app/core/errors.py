@@ -13,4 +13,3 @@ def unsupported_file(message: str):
         status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
         detail={"error": message}
     )
-

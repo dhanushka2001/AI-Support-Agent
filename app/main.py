@@ -6,6 +6,7 @@ load_dotenv() # Load the environment variables
 
 from app.config import settings
 from app.middleware.logging import LoggingMiddleware
+from app.middleware.file_size_limit import LimitUploadSizeMiddleware
 from app.routers.health import router as health_router
 from app.routers.pdf_upload import router as pdf_upload_router
 from app.routers.pdf_extract import router as pdf_extract_router
@@ -45,6 +46,7 @@ app.add_middleware(
 # LOGGING
 # -------
 app.add_middleware(LoggingMiddleware)
+app.add_middleware(LimitUploadSizeMiddleware)
 
 
 # -------

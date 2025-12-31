@@ -2958,6 +2958,9 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
         return response.choices[0].message.content.strip()
     ```
 
+    using ``.get("rewrite", message["content"])`` to prefer the rewritten query if it exists, else use the actual query.
+
+
   * ``app/services/conversation_service.py``:
  
     ```py
@@ -3045,7 +3048,7 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
         timestamp: 2025-12-30T16:03:36.870+00:00
       1: Object
         role: "assistant"
-        content: "The return delivery method involves arranging for the return of your d…"
+        content: "The return delivery method is that you will arrange for the return of your documents by adding stamps onto a self-addressed envelope, which you'll include with your documents. The cost for the stamps typically ranges from £1 to £8, and it varies."
         timestamp: 2025-12-30T16:03:36.910+00:00
       2: Object
         role: "user"
@@ -3073,7 +3076,7 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
             return "I do not know based on the provided documents."
     ```
 
-  * However, as it did not say that exact sentence, I can rule that out. Also, the current system will return the most relevant chunks, no matter how long the actual relevancy score is. And since there are more than 5 chunks, it is guaranteed that ``context_chunks`` will be non-empty.
+  * However, as it did not say that exact sentence, I can rule that out. Also, the current system will return the most relevant chunks, no matter how low the actual relevancy score is. And since there are more than 5 chunks, it is guaranteed that ``context_chunks`` will be non-empty.
   * The issue was actually just that the ``SYSTEM_PROMPT`` was too strict still.
   * Currently, ``SYSTEM_PROMPT`` reads:
  
@@ -3120,27 +3123,63 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
 
 </details>
 
-  
-<!--
-<details><summary> Day N - 05/12/25 </summary>
+<details><summary> Day 15 - 31/12/25 </summary>
 
-## Day N - 05/12/25
+## Day 15 - 31/12/25
 
-* <details><summary> xxx </summary>
+* <details><summary> File size limit </summary>
 
-  ...
+  * Added a file size limiter. At first I tried to implement it by adding a check in ``file_storage.py``, but this did not work.
+  * The solution was to add a ``middleware``:
+ 
+    ``app/middleware/file_too_large.py``:
+
+    ```py
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse
+    from starlette import status
+    
+    MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20MB
+    
+    class LimitUploadSizeMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            content_length = request.headers.get("content-length")
+    
+            if content_length and int(content_length) > MAX_UPLOAD_SIZE:
+                return JSONResponse(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    content={"error": "20MB file upload limit exceeded"},
+                )
+    
+            return await call_next(request)
+    ```
+
+    and register it in ``main.py``:
+
+    ```py
+    from app.middleware.file_size_limit import LimitUploadSizeMiddleware
+
+    app.add_middleware(LimitUploadSizeMiddleware)
+    ```
+
+  * The result when trying to upload a 70MB PDF:
+ 
+    <img width="918" height="917" alt="image" src="https://github.com/user-attachments/assets/7690f2c4-bcf8-4630-9a37-da6453315963" />
+
 
   </details>
   
 * <details><summary> New folder structure </summary>
-    !! USE THE LAST FOLDER STRUCTURE NOT THIS ONE !!
+  
     ```
     AI-Support-Agent/
       ├── app/
       │   ├── main.py
       │   ├── config.py
       │   ├── middleware/
-      │   │   └── logging.py
+      │   │   ├── logging.py
+      │   │   └── file_size_limit.py         <-- NEW
       │   ├── services/
       │   │   ├── file_storage.py
       │   │   ├── pdf_service.py
@@ -3167,14 +3206,80 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
       │       └── qdrant.py
       ├── qdrant_data/
       │   └── ...
-      ├── frontend/                  <-- NEW
-      │   ├── node_modules/          <-- NEW
-      │   │   └── ...                <-- NEW
-      │   ├── public/                <-- NEW
-      │   │   └── ...                <-- NEW
-      │   ├── src/                   <-- NEW
-      │   │   ├── App.tsx            <-- NEW
-      │   │   └── ...                <-- NEW
+      ├── frontend/
+      │   ├── node_modules/
+      │   │   └── ...
+      │   ├── public/
+      │   │   └── ...
+      │   ├── src/
+      │   │   ├── App.tsx
+      │   │   └── ...
+      │   └── ...
+      ├── .env
+      ├── .gitignore
+      ├── requirements.txt
+      └── README.md
+    ```
+  </details>
+
+</details>
+
+
+<!--
+<details><summary> Day N - 05/12/25 </summary>
+
+## Day N - 05/12/25
+
+* <details><summary> xxx </summary>
+
+  ...
+
+  </details>
+  
+* <details><summary> New folder structure </summary>
+    !! USE THE LAST FOLDER STRUCTURE NOT THIS ONE !!
+    ```
+    AI-Support-Agent/
+      ├── app/
+      │   ├── main.py
+      │   ├── config.py
+      │   ├── middleware/
+      │   │   ├── logging.py
+      │   │   └── file_size_limit.py         <-- NEW
+      │   ├── services/
+      │   │   ├── file_storage.py
+      │   │   ├── pdf_service.py
+      │   │   ├── document_repository.py
+      │   │   └── embedding_service.py
+      │   │   ├── search_service.py
+      │   │   ├── chat_service.py
+      │   │   └── conversation_service.py
+      │   ├── storage/
+      │   │   └── pdfs/
+      │   ├── core/
+      │   │   ├── errors.py
+      │   │   └── embeddings.py
+      │   ├── routers/
+      │   │   ├── health.py
+      │   │   ├── pdf_upload.py
+      │   │   ├── pdf_extract.py
+      │   │   ├── qdrant_health.py
+      │   │   ├── embeddings.py
+      │   │   ├── search.py
+      │   │   └── chat.py
+      │   └── db/
+      │       ├── mongodb.py
+      │       └── qdrant.py
+      ├── qdrant_data/
+      │   └── ...
+      ├── frontend/
+      │   ├── node_modules/
+      │   │   └── ...
+      │   ├── public/
+      │   │   └── ...
+      │   ├── src/
+      │   │   ├── App.tsx
+      │   │   └── ...
       │   └── ...
       ├── .env
       ├── .gitignore

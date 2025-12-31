@@ -33,7 +33,7 @@ def rewrite_query(question: str, previous_messages: list[dict]) -> str:
             "role": "system",
             "content": (
                 "Rewrite the user's latest question into a fully self-contained "
-                "question using the prior user questions as context. "
+                "question using the prior messages as context. "
                 "If the question is already self-contained, return it unchanged."
             )
         }
