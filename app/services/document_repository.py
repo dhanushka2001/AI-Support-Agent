@@ -6,7 +6,8 @@ def create_document(metadata: dict) -> dict:
     document = {
         "file_id": metadata["file_id"],
         "original_filename": metadata["filename"],
-        "stored_filename": metadata["stored_filename"],
+	"file_hash": metadata["file_hash"],
+        # "stored_filename": metadata["stored_filename"],
         "size_bytes": metadata["size_bytes"],
         "content_type": metadata["content_type"],
         "status": "UPLOADED",

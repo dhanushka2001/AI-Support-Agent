@@ -1,7 +1,9 @@
 import os
 import uuid
+import hashlib
 from fastapi import UploadFile
-from app.core.errors import unsupported_file, bad_request
+from app.core.errors import unsupported_file, bad_request, duplicate_file
+from app.db.mongodb import db
 
 # Base storage folder
 BASE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "storage", "pdfs")
@@ -46,10 +48,17 @@ def save_pdf(file: UploadFile) -> dict:
     # Reset pointer so file can be re-read if needed later
     file.file.seek(0)
 
+    # Duplicate pdf
+    file_hash = compute_file_hash(file)
+    existing = db.documents.find_one({"file_hash": file_hash})
+    if existing:
+        raise duplicate_file("This PDF has already been uploaded.")
+
     # Return metadata
     return {
         "file_id": file_id,
         "filename": file.filename,
+        "file_hash": file_hash,
         "stored_filename": filename,
         "path": filepath,
         "size_bytes": os.path.getsize(filepath),
@@ -66,3 +75,10 @@ def get_pdf_path(file_id: str) -> str:
 
     return filepath
 
+
+def compute_file_hash(file: UploadFile) -> str:
+    hasher = hashlib.sha256()
+    for chunk in iter(lambda: file.file.read(8192), b""):
+        hasher.update(chunk)
+    file.file.seek(0)
+    return hasher.hexdigest()

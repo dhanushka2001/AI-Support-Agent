@@ -3169,6 +3169,94 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
 
 
   </details>
+
+* <details><summary> Prevent duplicate PDFs </summary>
+
+  * In order to prevent the same PDF being uploaded again, I used ``hashlib`` to generate a unique hash for the contents of the PDF, checking if the hash matches with any of the hashes of the PDFs in the MongoDB documents collection, and if not, saving the PDF with its hash in the JSON.
+
+   * ``app/services/file_storage.py``:
+     
+      ```py
+      import hashlib
+      from app.core.errors import unsupported_file, bad_request, duplicate_file
+      from app.db.mongodb import db
+      
+      def save_pdf(file: UploadFile) -> dict:
+          # Validate PDF
+          validate_pdf(file)
+      
+          # Generate unique filename
+          file_id = str(uuid.uuid4())
+          filename = f"{file_id}.pdf"
+          filepath = os.path.join(BASE_DIR, filename)
+      
+          #  Read file bytes
+          file_bytes = file.file.read()
+      
+          # Save file data
+          with open(filepath, "wb") as out_file:
+              out_file.write(file_bytes)
+      
+          # Reset pointer so file can be re-read if needed later
+          file.file.seek(0)
+      
+          # Duplicate pdf
+          file_hash = compute_file_hash(file)
+          existing = db.documents.find_one({"file_hash": file_hash})
+          if existing:
+              raise duplicate_file("This PDF has already been uploaded.")
+      
+          # Return metadata
+          return {
+              "file_id": file_id,
+              "filename": file.filename,
+              "file_hash": file_hash,
+              "stored_filename": filename,
+              "path": filepath,
+              "size_bytes": os.path.getsize(filepath),
+              "content_type": file.content_type,
+          }
+      ```
+
+  * ``app/core/errors.py``:
+ 
+    ```py
+    def duplicate_file(message: str):
+        return HTTPException(
+                status_code=409,
+                detail={"error": message}
+        )
+    ```
+
+  * ``app/services/document_repository.py``:
+
+    ```py
+    def create_document(metadata: dict) -> dict:
+        document = {
+            "file_id": metadata["file_id"],
+            "original_filename": metadata["filename"],
+    	"file_hash": metadata["file_hash"],
+            # "stored_filename": metadata["stored_filename"],
+            "size_bytes": metadata["size_bytes"],
+            "content_type": metadata["content_type"],
+            "status": "UPLOADED",
+            "created_at": datetime.utcnow(),
+        }
+    
+        documents_collection.insert_one(document)
+        return document
+    ```
+
+  * Now when I try to upload a duplicate PDF it returns:
+ 
+    <img width="893" height="917" alt="image" src="https://github.com/user-attachments/assets/4df60ae2-a0c3-4948-80b8-f907b6b1e0a4" />
+
+  * And in MongoDB, I can see the PDF is stored with its unique hash:
+ 
+    <img width="651" height="175" alt="image" src="https://github.com/user-attachments/assets/1789d287-037c-401a-9677-5ecea86c8704" />
+
+
+  </details>
   
 * <details><summary> New folder structure </summary>
   
