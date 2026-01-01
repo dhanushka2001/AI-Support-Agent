@@ -12,8 +12,9 @@ async def upload_pdf(file: UploadFile = File(...)):
     document = create_document(metadata)
 
     return {
-        "message": "PDF uploaded successfully",
-        "metadata": metadata,
+        # "message": "PDF uploaded successfully",
+        # "metadata": metadata,
         "file_id": document["file_id"],
+        "original_filename": document["original_filename"],
         "status": document["status"]
     }

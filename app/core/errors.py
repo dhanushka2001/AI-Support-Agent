@@ -17,6 +17,13 @@ def unsupported_file(message: str):
 
 def duplicate_file(message: str):
     return HTTPException(
-            status_code=409,
-            detail={"error": message}
+        status_code=409,
+        detail={"error": message}
+    )
+
+
+def file_not_found(message: str):
+    return HTTPException(
+	status_code=404,
+	detail={"error": message}
     )

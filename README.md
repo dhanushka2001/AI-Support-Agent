@@ -3312,6 +3312,342 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
 
 </details>
 
+<details><summary> Day 16 - 01/01/26 </summary>
+
+## Day 16 - 01/01/26
+
+* <details><summary> PDF upload and list sidebar </summary>
+
+  * In order to add the list of uploaded PDFs to the sidebar, I first made a function in ``app/services/document_repository.py`` to list all the PDFs, and a function to delete a PDF:
+ 
+    ```py
+    def list_all_pdfs():
+        return list(documents_collection.find(
+            {}, 
+            {
+                "_id": 0,
+                "extracted_text": 0,
+                "stored_filename": 0,
+                "content_type": 0
+            }
+        ))
+
+    def delete_pdf_by_file_id(file_id: str):
+        pdf = documents_collection.find_one({"file_id": file_id})
+    
+        if not pdf:
+            raise HTTPException(404, "PDF not found")
+    
+        # 1. Delete file from disk
+        # 2. Delete chunks from Qdrant
+        # 3. Delete DB record
+    
+        documents_collection.delete_one({"file_id": file_id})
+    
+        return {"ok": True}
+    ```
+
+  * Made a new router, ``app/routers/pdf_list.py`` that uses ``list_all_pdfs()``:
+ 
+    ```py
+    from fastapi import APIRouter
+    from app.services.document_repository import list_all_pdfs
+    
+    router = APIRouter(prefix="/pdf", tags=["PDF List"])
+    
+    @router.get("/list")
+    async def list_pdfs():
+        return list_all_pdfs()
+    ```
+
+  * And a new router, ``app/routers/pdf_delete.py``, that uses ``delete_pdf_by_file_id(file_id: str)``:
+ 
+    ```py
+    from fastapi import APIRouter
+    from app.services.document_repository import delete_pdf_by_file_id
+    
+    router = APIRouter(prefix="/pdf", tags=["PDF Delete"])
+    
+    @router.delete("/{file_id}")
+    async def delete_pdf(file_id: str):
+        return delete_pdf_by_file_id(file_id)
+    ```
+
+  * And finally registering the routers in ``main.py``:
+ 
+    ```py
+    from app.routers.pdf_list import router as pdf_list_router
+    from app.routers.pdf_delete import router as pdf_delete_router
+
+    app.include_router(pdf_list_router)
+    app.include_router(pdf_delete_router)
+    ```
+
+  * To display the list of PDFs in the frontend sidebar, I added this to ``frontend/src/App.tsx``:
+ 
+    ```tsx
+    import { useState, useEffect, useRef } from "react";
+
+    type Pdf = {
+      file_id: string;
+      original_filename: string;
+      status: "processing" | "ready" | "failed";
+    };
+
+    function App() {
+      const [pdfs, setPdfs] = useState<Pdf[]>([]);
+      const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+      useEffect(() => {
+        fetch("http://localhost:8000/pdf/list")
+          .then(res => res.json())
+          .then(setPdfs);
+      }, []);
+
+      const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+      
+        const formData = new FormData();
+        formData.append("file", file);
+      
+        setUploading(true);
+      
+        const res = await fetch("http://localhost:8000/pdf/upload", {
+          method: "POST",
+          body: formData,
+        });
+      
+        if (res.ok) {
+          const pdf = await res.json();
+          setPdfs(prev => [...prev, pdf]);
+        } else {
+          const err = await res.json();
+          alert(err?.detail?.error ?? "Upload failed");
+        }
+      
+        setUploading(false);
+      };
+    
+      const deletePdf = async (fileId: string) => {
+        if (!confirm("Delete this PDF?")) return;
+      
+        await fetch(`http://localhost:8000/pdf/${fileId}`, {
+      method: "DELETE",
+        });
+      
+        setPdfs(prev => prev.filter(p => p.file_id !== fileId));
+      };
+
+      return (
+        <div style={{ display: "flex", height: "100vh", fontFamily: "sans-serif" }}>
+          
+          {/* Sidebar */}
+          <div
+            style={{
+              width: 220,
+              borderRight: "1px solid #ddd",
+              padding: 10,
+              overflowY: "auto",
+            }}
+          >
+            {/* Conversations */}
+            <button
+              onClick={startNewChat}
+              style={{ width: "100%", marginBottom: 10 }}
+            >
+              + New Chat
+            </button>
+      
+            {conversations.map((c) => (
+              <div
+                key={c.conversation_id}
+                onClick={() => loadConversation(c.conversation_id)}
+                style={{
+                  padding: "6px 8px",
+                  cursor: "pointer",
+                  background:
+                    c.conversation_id === conversationId ? "#aaa" : "transparent",
+                }}
+              >
+                {c.title || "New Chat"}
+              </div>
+            ))}
+    
+            {/* Documents */}
+          	<input
+          	  type="file"
+          	  accept="application/pdf"
+          	  hidden
+          	  ref={fileInputRef}
+          	  onChange={handleUpload}
+          	/>
+          	
+          	<button 
+          	  onClick={() => fileInputRef.current?.click()}
+                    style={{ width: "100%", marginBottom: 10 }}
+          	>
+          	  + Upload PDF
+          	</button>
+                 	
+          	{pdfs.map(pdf => (
+          	  <div 
+          	      key={pdf.file_id}
+          	      style={{
+          		display: "flex",
+          		alignItems: "flex-start",
+          		gap: 6,
+          		marginBottom: 6,
+          	      }}
+          	  >
+          	    
+          	    {/* Emoji column */}
+          	    <span style={{ flexShrink: 0 }}>📄</span>
+          
+          	    {/* Filename column */}
+          	    <span
+          		style={{
+          		    wordBreak: "break-word",
+          		    overflowWrap: "anywhere",
+          		    whiteSpace: "normal",
+          		    flex: 1,
+          		    lineHeight: "1.3",
+          		}}
+          	    >
+          	      {pdf.original_filename}
+          	      {pdf.status === "processing" && " (processing)"}
+          	    </span>
+          
+          	    {/* Delete button */}
+          	    <button
+          	      onClick={() => deletePdf(pdf.file_id)}
+          	      style={{
+          		color: "red",
+          		background: "transparent",
+          		fontSize: 12,
+          		padding: "2px 4px",
+          		lineHeight: 1,
+          		marginLeft: "auto" }}
+          	    >
+          	      ✕
+          	    </button>
+          	  </div>
+          	))}
+          </div>
+    ```
+
+  * The result:
+ 
+    <img width="957" height="914" alt="image" src="https://github.com/user-attachments/assets/629ab90f-c412-424f-9f8c-8e02e0627486" />
+
+
+  * Some frontend design issues that I fixed were:
+    * The PDF filename not wrapping onto the next line
+    * The delete button being too big
+    * Newly uploaded PDF's filename not displaying:
+      * Fixed by ensuring the variable name was the exact same (``"original_filename"``) in ``app/services/pdf_upload.py``, ``app/services/document_repository.py``, and ``frontend/src/App.tsx``.
+
+  * There is still an issue where if I upload a PDF and try to upload it again, instead of giving me the expected error, it just does nothing (neither uploads the PDF again nor prints an error). The issue goes away when I refresh the page first before trying to upload the same PDF again, this time displaying the error message as expected. But ideally, I want it to print the error without needing to refresh the page.
+  * Also when deleting a PDF, it won't upload the same PDF again unless I refresh the page.
+  * The fix for the two issues above was to ALWAYS reset the file input after upload:
+
+    ```diff
+      const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+      
+        const formData = new FormData();
+        formData.append("file", file);
+      
+        setUploading(true);
+      
+        const res = await fetch("http://localhost:8000/pdf/upload", {
+          method: "POST",
+          body: formData,
+        });
+      
+        if (res.ok) {
+          const pdf = await res.json();
+          setPdfs(prev => [...prev, pdf]);
+        } else {
+          const err = await res.json();
+          alert(err?.detail?.error ?? "Upload failed");
+        }
+    
+    +   if (fileInputRef.current) {
+    +   	fileInputRef.current.value = "";
+    +   }
+      
+        setUploading(false);
+      };
+    ```
+
+  * Now I can upload and delete the same file, and upload it again, without needing to refresh. And I get the error message when trying to upload a PDF that's already on the list, as expected.
+  * One future improvement would be to add a button to delete conversations, similar to the button to delete PDFs.
+  * Also need to add a button to extract from the PDF once it's been uploaded.
+  * I'm considering also adding a way to have multiple instances for different users, each having their own conversations and documents.
+  * The chunks are stored in ``qdrant_data/`` which is local to the machine, this means if the same user uses another machine, their uploaded files will be the same (pulled from MongoDB) but the extracted files and chunks won't be the same.
+  * When deleting a PDF, I am currently just deleting it from MongoDB. If the PDF had been chunked and extracted (i.e. added to ``qdrant_data/``), the chunks would also need to be deleted.
+
+        
+
+  </details>
+  
+* <details><summary> New folder structure </summary>
+
+    ```diff
+      AI-Support-Agent/
+        ├── app/
+        │   ├── main.py
+        │   ├── config.py
+        │   ├── middleware/
+        │   │   ├── logging.py
+        │   │   └── file_size_limit.py
+        │   ├── services/
+        │   │   ├── file_storage.py
+        │   │   ├── pdf_service.py
+        │   │   ├── document_repository.py
+        │   │   └── embedding_service.py
+        │   │   ├── search_service.py
+        │   │   ├── chat_service.py
+        │   │   └── conversation_service.py
+        │   ├── storage/
+        │   │   └── pdfs/
+        │   ├── core/
+        │   │   ├── errors.py
+        │   │   └── embeddings.py
+        │   ├── routers/
+        │   │   ├── health.py
+        │   │   ├── pdf_upload.py
+        │   │   ├── pdf_extract.py
+    +   │   │   ├── pdf_delete.py              <-- NEW
+    +   │   │   ├── pdf_list.py                <-- NEW
+        │   │   ├── qdrant_health.py
+        │   │   ├── embeddings.py
+        │   │   ├── search.py
+        │   │   └── chat.py
+        │   └── db/
+        │       ├── mongodb.py
+        │       └── qdrant.py
+        ├── qdrant_data/
+        │   └── ...
+        ├── frontend/
+        │   ├── node_modules/
+        │   │   └── ...
+        │   ├── public/
+        │   │   └── ...
+        │   ├── src/
+        │   │   ├── App.tsx
+        │   │   └── ...
+        │   └── ...
+        ├── .env
+        ├── .gitignore
+        ├── requirements.txt
+        └── README.md
+    ```
+  </details>
+
+</details>
 
 <!--
 <details><summary> Day N - 05/12/25 </summary>
@@ -3326,53 +3662,55 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
   
 * <details><summary> New folder structure </summary>
     !! USE THE LAST FOLDER STRUCTURE NOT THIS ONE !!
-    ```
-    AI-Support-Agent/
-      ├── app/
-      │   ├── main.py
-      │   ├── config.py
-      │   ├── middleware/
-      │   │   ├── logging.py
-      │   │   └── file_size_limit.py         <-- NEW
-      │   ├── services/
-      │   │   ├── file_storage.py
-      │   │   ├── pdf_service.py
-      │   │   ├── document_repository.py
-      │   │   └── embedding_service.py
-      │   │   ├── search_service.py
-      │   │   ├── chat_service.py
-      │   │   └── conversation_service.py
-      │   ├── storage/
-      │   │   └── pdfs/
-      │   ├── core/
-      │   │   ├── errors.py
-      │   │   └── embeddings.py
-      │   ├── routers/
-      │   │   ├── health.py
-      │   │   ├── pdf_upload.py
-      │   │   ├── pdf_extract.py
-      │   │   ├── qdrant_health.py
-      │   │   ├── embeddings.py
-      │   │   ├── search.py
-      │   │   └── chat.py
-      │   └── db/
-      │       ├── mongodb.py
-      │       └── qdrant.py
-      ├── qdrant_data/
-      │   └── ...
-      ├── frontend/
-      │   ├── node_modules/
-      │   │   └── ...
-      │   ├── public/
-      │   │   └── ...
-      │   ├── src/
-      │   │   ├── App.tsx
-      │   │   └── ...
-      │   └── ...
-      ├── .env
-      ├── .gitignore
-      ├── requirements.txt
-      └── README.md
+    ```diff
+      AI-Support-Agent/
+        ├── app/
+        │   ├── main.py
+        │   ├── config.py
+        │   ├── middleware/
+        │   │   ├── logging.py
+        │   │   └── file_size_limit.py
+        │   ├── services/
+        │   │   ├── file_storage.py
+        │   │   ├── pdf_service.py
+        │   │   ├── document_repository.py
+        │   │   └── embedding_service.py
+        │   │   ├── search_service.py
+        │   │   ├── chat_service.py
+        │   │   └── conversation_service.py
+        │   ├── storage/
+        │   │   └── pdfs/
+        │   ├── core/
+        │   │   ├── errors.py
+        │   │   └── embeddings.py
+        │   ├── routers/
+        │   │   ├── health.py
+        │   │   ├── pdf_upload.py
+        │   │   ├── pdf_extract.py
+    +   │   │   ├── pdf_delete.py              <-- NEW
+    +   │   │   ├── pdf_list.py                <-- NEW
+        │   │   ├── qdrant_health.py
+        │   │   ├── embeddings.py
+        │   │   ├── search.py
+        │   │   └── chat.py
+        │   └── db/
+        │       ├── mongodb.py
+        │       └── qdrant.py
+        ├── qdrant_data/
+        │   └── ...
+        ├── frontend/
+        │   ├── node_modules/
+        │   │   └── ...
+        │   ├── public/
+        │   │   └── ...
+        │   ├── src/
+        │   │   ├── App.tsx
+        │   │   └── ...
+        │   └── ...
+        ├── .env
+        ├── .gitignore
+        ├── requirements.txt
+        └── README.md
     ```
   </details>
 
