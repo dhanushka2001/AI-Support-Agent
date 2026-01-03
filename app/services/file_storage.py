@@ -2,7 +2,11 @@ import os
 import uuid
 import hashlib
 from fastapi import UploadFile
-from app.core.errors import unsupported_file, bad_request, duplicate_file
+from app.core.errors import (
+    unsupported_file, 
+    bad_request, 
+    duplicate_file,
+)
 from app.db.mongodb import db
 
 # Base storage folder

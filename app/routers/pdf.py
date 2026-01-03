@@ -1,12 +1,16 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from pathlib import Path
 from app.services.file_storage import save_pdf, get_pdf_path
 from app.services.pdf_service import extract_text_from_pdf, PDFExtractionError
+from app.services.embedding_service import embed_and_store
 from app.services.document_repository import (
     create_document,
     store_extracted_text,
     get_document_by_file_id,
     delete_pdf_by_file_id,
     list_all_pdfs,
+    get_document_text,
+    update_embed_status,
 )
 
 
@@ -27,7 +31,7 @@ async def upload_pdf(file: UploadFile = File(...)):
     }
 
 
-@router.post("/{file_id}/extract")
+@router.post("/extract/{file_id}")
 def extract_pdf_text(file_id: str):
     document = get_document_by_file_id(file_id)
 
@@ -54,6 +58,22 @@ def extract_pdf_text(file_id: str):
 
     except PDFExtractionError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/embed/{file_id}")
+def generate_embeddings(file_id: str):
+    text = get_document_text(file_id)
+    if not text:
+        raise HTTPException(status_code=404, detail="No extracted text found")
+
+    count = embed_and_store(file_id, text)
+    
+    update_embed_status(file_id, count)
+
+    return {
+        "file_id": file_id,
+        "chunks_embedded": count
+    }
 
 
 @router.get("/list")

@@ -38,6 +38,22 @@ def store_extracted_text(file_id: str, text: str):
         raise ValueError("Document not found")
 
 
+def update_embed_status(file_id: str, count: int):
+    result = documents_collection.update_one(
+        {"file_id": file_id},
+        {
+            "$set": {
+                "status": "EMBEDDED",
+                "chunks_embedded": count,
+                "extracted_at": datetime.utcnow(),
+            }
+        }
+    )
+
+    if result.matched_count == 0:
+        raise ValueError("Document not found")
+
+
 def get_document_text(file_id: str) -> str | None:
     doc = documents_collection.find_one(
         {"file_id": file_id},

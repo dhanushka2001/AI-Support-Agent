@@ -13,7 +13,7 @@ type Conversation = {
 type Pdf = {
   file_id: string;
   original_filename: string;
-  status: "processing" | "UPLOADED" | "EXTRACTED" | "failed";
+  status: "processing" | "extracting" | "embedding" |"UPLOADED" | "EXTRACTED" | "EMBEDDED" | "failed";
 };
 
 
@@ -28,6 +28,7 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   
+ 
   useEffect(() => {
     const loadLatestConversation = async () => {
       try {
@@ -81,6 +82,7 @@ function App() {
     setMessages([]);
   };
 
+
   const loadConversation = async (id: string) => {
     if (id == conversationId) return; // prevent wasteful reload
 
@@ -130,7 +132,8 @@ function App() {
     setLoading(false);
   };
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+
+  const uploadPdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
   
@@ -143,22 +146,94 @@ function App() {
       method: "POST",
       body: formData,
     });
-  
-    if (res.ok) {
-      const pdf = await res.json();
-      setPdfs(prev => [...prev, pdf]);
-    } else {
-      const err = await res.json();
-      alert(err?.detail?.error ?? "Upload failed");
+
+    if (!res.ok) {
+	const err = await res.json();
+	alert(err?.detail?.error ?? "Upload failed");
+	setUploading(false);
+	return;
     }
 
+    const pdf = await res.json();
+
+    // Add PDF immediately
+    setPdfs(prev => [...prev, pdf]);
+
+    // Reset input so same file can be re-uploaded if deleted
     if (fileInputRef.current) {
     	fileInputRef.current.value = "";
     }
   
     setUploading(false);
+
+    // trigger extraction
+    extractPdf(pdf.file_id);
+  };
+
+
+  const extractPdf = async (fileId: string) => {
+    // Optimistically mark as extracting
+    setPdfs(prev =>
+      prev.map(p =>
+        p.file_id === fileId ? { ...p, status: "extracting" } : p
+      )
+    );
+  
+    const res = await fetch(
+      `http://localhost:8000/pdf/extract/${fileId}`,
+      { method: "POST" }
+    );
+  
+    if (!res.ok) {
+      setPdfs(prev =>
+        prev.map(p =>
+          p.file_id === fileId ? { ...p, status: "failed" } : p
+        )
+      );
+      return;
+    }
+  
+    setPdfs(prev =>
+      prev.map(p =>
+        p.file_id === fileId ? { ...p, status: "EXTRACTED" } : p
+      )
+    );
+
+    // trigger embedding
+    embedPdf(fileId);
+  };
+
+
+  const embedPdf = async (fileId: string) => {
+    // Optimistically mark as embedding
+    setPdfs(prev =>
+      prev.map(p =>
+        p.file_id === fileId ? { ...p, status: "embedding" } : p
+      )
+    );
+  
+    const res = await fetch(
+      `http://localhost:8000/pdf/embed/${fileId}`,
+      { method: "POST" }
+    );
+  
+    if (!res.ok) {
+      setPdfs(prev =>
+        prev.map(p =>
+          p.file_id === fileId ? { ...p, status: "failed" } : p
+        )
+      );
+      return;
+    }
+  
+    setPdfs(prev =>
+      prev.map(p =>
+        p.file_id === fileId ? { ...p, status: "EMBEDDED" } : p
+      )
+    );
   };
   
+
   const deletePdf = async (fileId: string) => {
     if (!confirm("Delete this PDF?")) return;
   
@@ -169,6 +244,7 @@ function App() {
     setPdfs(prev => prev.filter(p => p.file_id !== fileId));
   };
 
+  
   const openMenu = (e: React.MouseEvent, convo: Conversation) => {
     e.stopPropagation();
     setMenuOpenId(convo.conversation_id === menuOpenId ? null : convo.conversation_id);
@@ -188,7 +264,8 @@ function App() {
   };
   */}
 
-  const handleRename = async (convo: Conversation) => {
+
+  const renameConvo = async (convo: Conversation) => {
     const newTitle = prompt("Enter new conversation title:", convo.title || "");
     if (!newTitle) return;
   
@@ -210,7 +287,8 @@ function App() {
     setMenuOpenId(null);
   };
   
-  const handleDelete = async (convo: Conversation) => {
+
+  const deleteConvo = async (convo: Conversation) => {
     if (!confirm("Are you sure you want to delete this conversation?")) return;
   
     const res = await fetch(`http://localhost:8000/chat/${convo.conversation_id}`, {
@@ -233,6 +311,7 @@ function App() {
   
     setMenuOpenId(null);
   };
+
 
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "sans-serif" }}>
@@ -298,7 +377,7 @@ function App() {
 	          style={{ padding: "4px 8px", cursor: "pointer" }}
 	          onClick={(e) => {
 		      e.stopPropagation();
-		      handleRename(c);
+		      renameConvo(c);
 		  }}
 	        >
 	          Rename
@@ -307,7 +386,7 @@ function App() {
 	          style={{ padding: "4px 8px", cursor: "pointer", color: "red" }}
 	          onClick={(e) => {
 		      e.stopPropagation();
-		      handleDelete(c);
+		      deleteConvo(c);
 		  }}
 	        >
 	          Delete
@@ -326,7 +405,7 @@ function App() {
 	  accept="application/pdf"
 	  hidden
 	  ref={fileInputRef}
-	  onChange={handleUpload}
+	  onChange={uploadPdf}
 	/>
 	
 	{/* Upload PDF button */}
@@ -353,17 +432,17 @@ function App() {
 	    <span style={{ flexShrink: 0 }}>📄</span>
 
 	    {/* Filename column */}
-	    <span
-		style={{
-		    wordBreak: "break-word",
-		    overflowWrap: "anywhere",
-		    whiteSpace: "normal",
-		    flex: 1,
-		    lineHeight: "1.3",
-		}}
-	    >
-	      {pdf.original_filename}
-	      {pdf.status === "processing" && " (processing)"}
+	    <span style={{
+	      wordBreak: "break-word",
+	      overflowWrap: "anywhere",
+	      whiteSpace: "normal",
+	      flex: 1,
+	      lineHeight: "1.3",
+	    }}>
+	        {pdf.original_filename}
+	        {pdf.status === "extracting" && " (extracting...)"}
+	        {pdf.status === "embedding" && " (embedding...)"}
+	        {pdf.status === "failed" && " (FAILED ❌)"}
 	    </span>
 
 	    {/* Delete button */}

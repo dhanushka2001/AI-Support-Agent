@@ -3961,6 +3961,379 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
 
 </details>
 
+<details><summary> Day 18 - 03/01/25 </summary>
+
+## Day 18 - 03/01/25
+
+* <details><summary> Fixed frontend error message for file too large </summary>
+
+  * As mentioned earlier when implementing error handling for files that are too big, I needed to make it a ``Middleware``:
+ 
+    ```py
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse
+    from starlette import status
+    
+    MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20MB
+    
+    class LimitUploadSizeMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            content_length = request.headers.get("content-length")
+    
+            if content_length and int(content_length) > MAX_UPLOAD_SIZE:
+                return JSONResponse(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    content={"error": "20MB file upload limit exceeded"},
+                )
+    
+            return await call_next(request)
+    ```
+
+    rather than like the typical error handlers in ``app/core/errors.py``:
+
+    ```py
+    from fastapi import HTTPException, status
+    
+    def bad_request(message: str):
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": message}
+        )
+    ```
+
+  * This worked fine in the backend, I had to make a small fix to make it identical:
+ 
+    ```diff
+    - content={"error": "20MB file upload limit exceeded"},
+    + content={"detail": {"error": "20MB file upload limit exceeded"}},
+    ```
+
+  * But other than that I expected it to work the same on the frontend, a pop-up with the error message on the screen. However when I uploaded a PDF >20MB no pop-up displayed.
+  * This was the first time where ChatGPT did not help, but Claude Sonnet 4.5 did help. I already made sure the size limit middleware was added **after** CORS middleware. 
+ 
+    ```
+    # -----------
+    # CORS CONFIG
+    # -----------
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
+    
+    # -------
+    # LOGGING
+    # -------
+    app.add_middleware(LoggingMiddleware)
+    app.add_middleware(LimitUploadSizeMiddleware)
+    ```
+
+  * The fix was to simply add the CORS headers manually:
+ 
+    ```py
+    response = JSONResponse(
+        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        content={"detail": {"error": "20MB file upload limit exceeded"}},
+    )
+    # Add CORS headers manually
+    response.headers["Access-Control-Allow-Origin"] = "http://localhost:5173"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
+    ```
+
+  * As described by Sonnet: _"The issue is that your middleware is returning a JSONResponse without the necessary CORS headers. When FastAPI normally handles requests, it adds CORS headers through your CORS middleware, but your custom middleware is short-circuiting the request before those headers get added."_
+ 
+  * The result:
+ 
+    <img width="960" height="957" alt="image" src="https://github.com/user-attachments/assets/0c9af1e9-ff97-449f-ac75-ee686deffa08" />
+
+  </details>
+  
+* <details><summary> Added backend extraction and embedding to frontend upload process </summary>
+
+  * I firstly moved the embedding router into ``app/routers/pdf.py``, to centralize processes related to PDFs:
+ 
+    ```py
+    @router.post("/embed/{file_id}")
+    def generate_embeddings(file_id: str):
+        text = get_document_text(file_id)
+        if not text:
+            raise HTTPException(status_code=404, detail="No extracted text found")
+    
+        count = embed_and_store(file_id, text)
+        
+        update_embed_status(file_id, count)
+    
+        return {
+            "file_id": file_id,
+            "chunks_embedded": count
+        }
+    ```
+ 
+  * Added a function to ``app/services/document_repository.py`` to update the ``status`` to ``EMBEDDED`` and store the number of ``chunks_embedded`` and ``extracted_at`` date:
+ 
+    ```py
+    def update_embed_status(file_id: str, count: int):
+        result = documents_collection.update_one(
+            {"file_id": file_id},
+            {
+                "$set": {
+                    "status": "EMBEDDED",
+                    "chunks_embedded": count,
+                    "extracted_at": datetime.utcnow(),
+                }
+            }
+        )
+    
+        if result.matched_count == 0:
+            raise ValueError("Document not found")
+    ```
+
+  * And lastly updated the frontend, ``frontend/src/App.tsx``:
+ 
+    ```diff
+      type Pdf = {
+        file_id: string;
+        original_filename: string;
+    -   status: "processing" | "UPLOADED" | "EXTRACTED" | "failed";
+    +   status: "processing" | "extracting" | "embedding" |"UPLOADED" | "EXTRACTED" | "EMBEDDED" | "failed";
+      };
+    ```
+
+    ```diff
+      const uploadPdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+        if (!file) return;
+      
+        const formData = new FormData();
+        formData.append("file", file);
+      
+        setUploading(true);
+      
+        const res = await fetch("http://localhost:8000/pdf/upload", {
+          method: "POST",
+          body: formData,
+        });
+    
+        if (!res.ok) {
+    	const err = await res.json();
+    	alert(err?.detail?.error ?? "Upload failed");
+    	setUploading(false);
+    	return;
+        }
+    
+        const pdf = await res.json();
+    
+        // Add PDF immediately
+        setPdfs(prev => [...prev, pdf]);
+    
+        // Reset input so same file can be re-uploaded if deleted
+        if (fileInputRef.current) {
+        	fileInputRef.current.value = "";
+        }
+      
+        setUploading(false);
+    
+    +   // trigger extraction
+    +   extractPdf(pdf.file_id);
+      };
+    ```
+
+    ```tsx
+    const extractPdf = async (fileId: string) => {
+      // Optimistically mark as extracting
+      setPdfs(prev =>
+        prev.map(p =>
+          p.file_id === fileId ? { ...p, status: "extracting" } : p
+        )
+      );
+    
+      const res = await fetch(
+        `http://localhost:8000/pdf/extract/${fileId}`,
+        { method: "POST" }
+      );
+    
+      if (!res.ok) {
+        setPdfs(prev =>
+          prev.map(p =>
+            p.file_id === fileId ? { ...p, status: "failed" } : p
+          )
+        );
+        return;
+      }
+    
+      setPdfs(prev =>
+        prev.map(p =>
+          p.file_id === fileId ? { ...p, status: "EXTRACTED" } : p
+        )
+      );
+  
+      // trigger embedding
+      embedPdf(fileId);
+    };
+  
+  
+    const embedPdf = async (fileId: string) => {
+      // Optimistically mark as embedding
+      setPdfs(prev =>
+        prev.map(p =>
+          p.file_id === fileId ? { ...p, status: "embedding" } : p
+        )
+      );
+    
+      const res = await fetch(
+        `http://localhost:8000/pdf/embed/${fileId}`,
+        { method: "POST" }
+      );
+    
+      if (!res.ok) {
+        setPdfs(prev =>
+          prev.map(p =>
+            p.file_id === fileId ? { ...p, status: "failed" } : p
+          )
+        );
+        return;
+      }
+    
+      setPdfs(prev =>
+        prev.map(p =>
+          p.file_id === fileId ? { ...p, status: "EMBEDDED" } : p
+        )
+      );
+    };
+    ```
+
+    ```diff
+	    {/* Filename column */}
+	    <span style={{
+	      wordBreak: "break-word",
+	      overflowWrap: "anywhere",
+	      whiteSpace: "normal",
+	      flex: 1,
+	      lineHeight: "1.3",
+	    }}>
+          {pdf.original_filename}
+    -     {pdf.status === "processing" && " (processing)"}
+    +     {pdf.status === "extracting" && " (extracting...)"}
+    +     {pdf.status === "embedding" && " (embedding...)"}
+    +     {pdf.status === "failed" && " (FAILED ❌)"}
+	    </span>
+    ```
+
+  * The result:
+ 
+    * After uploading a PDF, it displays the ``(extracting...)`` phase on the frontend:
+   
+      <img width="237" height="59" alt="image" src="https://github.com/user-attachments/assets/7eeb2f80-ced1-4a52-be42-05f7a0e7617b" />
+
+    * After the ``(extracting...)`` phase, it displays the ``(embedding...)`` phase:
+   
+      <img width="239" height="58" alt="image" src="https://github.com/user-attachments/assets/dc6d6ef3-3bf2-4d36-a84d-b77002bc7a0b" />
+
+    * And if no errors occurred throughout, it displays the file in the sidebar as normal:
+   
+      <img width="238" height="42" alt="image" src="https://github.com/user-attachments/assets/296d559a-2f01-4227-b0fb-88f0c42cff0d" />
+
+    * In the backend:
+   
+      <img width="578" height="216" alt="image" src="https://github.com/user-attachments/assets/8da21cb9-c180-40b1-b4cb-f5ccee4e0835" />
+
+  * And now when asking a question related to the PDF, the AI is able to give a correct response, showing that it has successfully uploaded, extracted, and embedded the PDF:
+ 
+    <img width="1042" height="914" alt="image" src="https://github.com/user-attachments/assets/07603eb3-2495-4174-8a30-f745478541bc" />
+
+  * Lastly, I notice that the system is decent at detecting when it is necessary to rewrite the user's query, although the rewrite seems to not be formed as a question but rather an answer to the user's query, which is not what we want:
+ 
+    <img width="593" height="494" alt="image" src="https://github.com/user-attachments/assets/3637ac4d-6370-4f21-8be6-1de200010780" />
+
+    ```
+    "content": "Can you summarise and explain the first part?"
+    "rewrite":
+      "The first part of question 1 on problem sheet 2 involves using the Maxwell distribution function to derive important statistical properties of gas particles in thermal equilibrium. Here's a summary and explanation of the key components:
+
+      1. **Maxwell Distribution Function**: This function describes the distribution of speeds of particles in an ideal gas at a given temperature \(T\). It is a fundamental result in statistical mechanics and is given by:
+         \[
+         f(v) = \left( \frac{m}{2\pi kT} \right)^{3/2} e^{-\frac{mv^2}{2kT}}
+         \]
+         where \(m\) is the mass of the particles, \(k\) is the Boltzmann constant, and \(T\) is the absolute temperature.
+      
+      2. **Average Speed \(\langle |v| \rangle\)**: The first part asks to show that the average speed of a particle in the gas can be calculated as:
+         \[
+         \langle |v| \rangle = \sqrt{\frac{8kT}{\pi m}}
+         \]
+         This result indicates that the average speed depends on the temperature and the mass of the particles. Higher temperatures lead to higher average speeds.
+      
+      3. **Mean Square Speed \(\langle v^2 \rangle\)**: The second part requires showing that the mean square speed of the particles is given by:
+         \[
+         \langle v^2 \rangle = \frac{3kT}{m}
+         \]
+         This result is significant because it relates the average kinetic energy of the particles to the temperature of the gas. Specifically, it shows that the average kinetic energy per degree of freedom is \(\frac{1}{2}kT\), consistent with the equipartition theorem.
+      
+      In summary, the first part of the question establishes fundamental relationships between the speed of gas particles, their mass, and the temperature of the gas, which are crucial for understanding the behavior of gases in statistical mechanics."
+    ```
+
+  * This is the ``rewrite_query()`` function in ``app/services/chat_service.py``, I thought it would work fine and the prompt is reasonable, but I guess I might need to adjust it:
+ 
+    ```py
+    def rewrite_query(question: str, previous_messages: list[dict]) -> str:
+        if not previous_messages:
+            return question
+    
+        # keep last 4 turns (2 from user, 2 from AI)
+        last_n_messages = previous_messages[-4:]
+    
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Rewrite the user's latest question into a fully self-contained "
+                    "question using the prior messages as context. "
+                    "If the question is already self-contained, return it unchanged."
+                )
+            }
+        ]
+    
+        for message in last_n_messages:
+            messages.append({
+                "role": message["role"],
+                "content": message.get("rewrite", message["content"])
+            })
+    
+        # append the new question to the message history
+        messages.append({
+            "role": "user",
+            "content": question
+        })
+    
+        # generate the rewritten query with the message history context
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0,      # Zero-temperature rewriting
+        )
+    
+        return response.choices[0].message.content.strip()
+    ```
+    
+  </details>
+
+* <details><summary> Future additions </summary>
+
+  * Possibly add functionality for multiple users, each having their own collection of conversations and documents, and a menu to login?
+  * Possibly store ``qdrant_data/`` in MongoDB for persistance across multiple devices?
+  * Handle deletion of chunks from Qdrant when an extracted PDF is deleted.
+  * Sentiment analysis, key entities extraction, knowledge graph relationships, PDF report generation.
+  * Add PDF title to extracted text (for context awareness)
+  * Make newly created conversation visible in sidebar without needing to refresh
+
+  </details>
+
+</details>
+
 <!--
 <details><summary> Day N - 05/12/25 </summary>
 
