@@ -3649,6 +3649,318 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
 
 </details>
 
+<details><summary> Day 17 - 02/01/25 </summary>
+
+## Day 17 - 02/01/25
+
+* <details><summary> Moved all pdf routers to single file </summary>
+
+  * Combined all the pdf routers (``pdf_delete.py``, ``pdf_extract.py``, ``pdf_list.py``, ``pdf_upload.py``) to a single file, ``app/routers/pdf.py``:
+ 
+    ```py
+    from fastapi import APIRouter, UploadFile, File, HTTPException
+    from app.services.file_storage import save_pdf, get_pdf_path
+    from app.services.pdf_service import extract_text_from_pdf, PDFExtractionError
+    from app.services.document_repository import (
+        create_document,
+        store_extracted_text,
+        get_document_by_file_id,
+        delete_pdf_by_file_id,
+        list_all_pdfs,
+    )
+    
+    
+    router = APIRouter(prefix="/pdf", tags=["PDF"])
+    
+    
+    @router.post("/upload")
+    async def upload_pdf(file: UploadFile = File(...)):
+        metadata = save_pdf(file)
+        document = create_document(metadata)
+    
+        return {
+            # "message": "PDF uploaded successfully",
+            # "metadata": metadata,
+            "file_id": document["file_id"],
+            "original_filename": document["original_filename"],
+            "status": document["status"]
+        }
+    
+    
+    @router.post("/{file_id}/extract")
+    def extract_pdf_text(file_id: str):
+        document = get_document_by_file_id(file_id)
+    
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+    
+        if document.get("status") == "EXTRACTED":
+            return {
+                "message": "Text already extracted",
+                "file_id": file_id,
+            }
+    
+        try:
+            pdf_path = Path(get_pdf_path(file_id))
+            text = extract_text_from_pdf(pdf_path)
+    
+            store_extracted_text(file_id, text)  # MongoDB
+    
+            return {
+                "file_id": file_id,
+                "text_length": len(text),
+                "text_preview": text[:1000],  # prevent massive response
+            }
+    
+        except PDFExtractionError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    
+    
+    @router.get("/list")
+    async def list_pdfs():
+        return list_all_pdfs()
+    
+    
+    @router.delete("/{file_id}")
+    async def delete_pdf(file_id: str):
+        return delete_pdf_by_file_id(file_id)
+    ```
+
+  </details>
+
+* <details><summary> Sidebar menu to rename and delete conversations </summary>
+
+  * Added functions to rename and delete conversations in ``app/services/conversation_service.py``:
+ 
+    ```py
+    def rename_conversation_by_id(conversation_id: str, new_title: str):
+        result = db.conversations.update_one(
+            {"conversation_id": conversation_id},
+            {"$set": {
+                "title": new_title,
+                "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        return result
+    
+    
+    def delete_conversation_by_id(conversation_id: str):
+        result = db.conversations.delete_one({"conversation_id": conversation_id})
+        return result
+    ```
+
+  * Made two routers to handle renaming and deleting conversations using the functions above in ``app/routers/chat.py``:
+ 
+    ```py
+    @router.patch("/{conversation_id}/rename")
+    async def rename_conversation(conversation_id: str, new_title: str):
+        result = rename_conversation_by_id(conversation_id, new_title)
+    
+        if result.matched_count == 0:
+            raise file_not_found("Conversation not found")
+        
+        return {"conversation_id": conversation_id, "title": new_title}
+    
+    
+    @router.delete("/{conversation_id}")
+    async def delete_conversation(conversation_id: str):
+        result = delete_conversation_by_id(conversation_id)
+    
+        if result.deleted_count == 0:
+            raise file_not_found("Conversation not found")
+    
+        return {"deleted": True}
+    ```
+
+  * And finally updated the frontend, ``frontend/src/App.tsx``, to add the menu icon for each of the conversations, the dropdown menu containing the buttons to "Rename" and "Delete", and connecting them to the backend:
+ 
+    ```tsx
+    function App() {
+      const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+
+      const openMenu = (e: React.MouseEvent, convo: Conversation) => {
+        e.stopPropagation();
+        setMenuOpenId(convo.conversation_id === menuOpenId ? null : convo.conversation_id);
+      };
+
+      const handleRename = async (convo: Conversation) => {
+        const newTitle = prompt("Enter new conversation title:", convo.title || "");
+        if (!newTitle) return;
+      
+        const res = await fetch(`http://localhost:8000/chat/${convo.conversation_id}/rename?new_title=${encodeURIComponent(newTitle)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+        });
+      
+        if (res.ok) {
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.conversation_id === convo.conversation_id ? { ...c, title: newTitle } : c
+            )
+          );
+        } else {
+          alert("Failed to rename conversation");
+        }
+      
+        setMenuOpenId(null);
+      };
+      
+      const handleDelete = async (convo: Conversation) => {
+        if (!confirm("Are you sure you want to delete this conversation?")) return;
+      
+        const res = await fetch(`http://localhost:8000/chat/${convo.conversation_id}`, {
+          method: "DELETE",
+        });
+      
+        if (res.ok) {
+          setConversations((prev) =>
+            prev.filter((c) => c.conversation_id !== convo.conversation_id)
+          );
+      
+          // Clear chat panel if this conversation was open
+          if (convo.conversation_id === conversationId) {
+            setConversationId(null);
+            setMessages([]);
+          }
+        } else {
+          alert("Failed to delete conversation");
+        }
+      
+        setMenuOpenId(null);
+      };
+    ```
+
+    ```diff
+    	{/* Conversations list */}
+    	{conversations.map((c) => (
+    	  <div
+    	    key={c.conversation_id}
+                onClick={() => loadConversation(c.conversation_id)}
+    	    style={{
+    	      display: "flex",
+    +	      alignItems: "center",
+    +	      justifyContent: "space-between",
+    	      padding: "6px 8px",
+    	      cursor: "pointer",
+    	      background: c.conversation_id === conversationId ? "#aaa" : "transparent",
+    +	      position: "relative",
+    	    }}
+    	  >
+    	    {c.title || "New Chat"}
+    	
+    +	    {/* 3-dot menu */}
+    +	    <span style={{ cursor: "pointer" }}
+    +		onClick={(e) => {
+    +		    e.stopPropagation();
+    +		    openMenu(e, c);
+    +		}}
+    +	    >
+    +	      ⋯
+    +	    </span>
+    	    
+    +	    {menuOpenId === c.conversation_id && (
+    +	      <div
+    +	        style={{
+    +	          position: "absolute",
+    +	          background: "#444",
+    +	          border: "1px solid #ccc",
+    +		  padding: 4,
+    +	          top: "100%",
+    +		  right: 0,
+    +	          zIndex: 100,
+    +		  minWidth: 80,
+    +	        }}
+    +	      >
+    +	        <div
+    +	          style={{ padding: "4px 8px", cursor: "pointer" }}
+    +	          onClick={(e) => {
+    +		      e.stopPropagation();
+    +		      handleRename(c);
+    +		  }}
+    +	        >
+    +	          Rename
+    +	        </div>
+    +	        <div
+    +	          style={{ padding: "4px 8px", cursor: "pointer", color: "red" }}
+    +	          onClick={(e) => {
+    +		      e.stopPropagation();
+    +		      handleDelete(c);
+    +		  }}
+    +	        >
+    +	          Delete
+    +	        </div>
+    +	      </div>
+    +	    )}
+    +	  </div>
+    +	))}
+    ```
+
+  * Added a click listener to ``App.tsx`` so that the dropdown menu automatically closes when the user clicks elsewhere:
+ 
+    ```tsx
+    useEffect(() => {
+      const handleClickOutside = () => setMenuOpenId(null);
+      document.addEventListener("click", handleClickOutside);
+      return () => document.removeEventListener("click", handleClickOutside);
+    }, []);
+    ```
+
+  * Added this single line to ``loadConversation`` in ``App.tsx`` to prevent the website reloading the current conversation if the user clicks on the current conversation in the sidebar. This prevents a wasteful reload:
+ 
+    ```diff
+      const loadConversation = async (id: string) => {
+    +   if (id == conversationId) return; // prevent wasteful reload
+    
+        setConversationId(id);
+        setMessages([]);
+    
+        const res = await fetch(`http://localhost:8000/chat/${id}`);
+        const data = await res.json();
+      
+        setMessages(data.messages);
+      };
+    ```
+    
+  * The result:
+    * Sidebar with menu buttons next to the conversations:
+
+      <img width="960" height="914" alt="image" src="https://github.com/user-attachments/assets/f181966e-3705-4b8d-95d1-00d686b0f1af" />
+
+    * Clicking on the menu button:
+
+      <img width="427" height="353" alt="image" src="https://github.com/user-attachments/assets/7874f944-3bec-4644-ac0f-54c525bbd842" />
+
+    * Clicking "Rename":
+
+      <img width="958" height="954" alt="image" src="https://github.com/user-attachments/assets/187e9742-cf42-4d25-8357-6d3eb382e538" />
+
+      * Pressing "OK":
+     
+        <img width="360" height="278" alt="image" src="https://github.com/user-attachments/assets/bc3fd856-c87b-4eec-ba75-a5e097434d26" />
+
+    * Clicking "Delete":
+   
+      <img width="958" height="957" alt="image" src="https://github.com/user-attachments/assets/683c4ebe-788b-4401-a913-137d097a382f" />
+
+      * Pressing "OK":
+
+        <img width="959" height="915" alt="image" src="https://github.com/user-attachments/assets/afd50e31-2caf-4e7c-9931-2ea74019c63d" />
+
+  </details>
+
+* <details><summary> Future additions </summary>
+
+  * Need to add a button to extract from PDFs after uploading.
+  * Possibly add functionality for multiple users, each having their own collection of conversations and documents, and a menu to login?
+  * Possibly store ``qdrant_data/`` in MongoDB for persistance across multiple devices?
+  * Handle deletion of chunks from Qdrant when an extracted PDF is deleted.
+  * Sentiment analysis, key entities extraction, knowledge graph relationships, PDF report generation.
+
+  </details>
+
+</details>
+
 <!--
 <details><summary> Day N - 05/12/25 </summary>
 

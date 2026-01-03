@@ -1,3 +1,4 @@
+from fastapi import HTTPException
 from datetime import datetime
 from uuid import uuid4
 from app.db.mongodb import db
@@ -74,3 +75,19 @@ def list_conversations(limit: int = 20):
         .limit(limit)
     )
 
+
+def rename_conversation_by_id(conversation_id: str, new_title: str):
+    result = db.conversations.update_one(
+        {"conversation_id": conversation_id},
+        {"$set": {
+            "title": new_title,
+            "updated_at": datetime.utcnow()
+            }
+        }
+    )
+    return result
+
+
+def delete_conversation_by_id(conversation_id: str):
+    result = db.conversations.delete_one({"conversation_id": conversation_id})
+    return result

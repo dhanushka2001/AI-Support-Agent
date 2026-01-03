@@ -8,10 +8,7 @@ from app.config import settings
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.file_size_limit import LimitUploadSizeMiddleware
 from app.routers.health import router as health_router
-from app.routers.pdf_upload import router as pdf_upload_router
-from app.routers.pdf_extract import router as pdf_extract_router
-from app.routers.pdf_list import router as pdf_list_router
-from app.routers.pdf_delete import router as pdf_delete_router
+from app.routers.pdf import router as pdf_router
 from app.routers.qdrant_health import router as qdrant_health_router
 from app.routers.embeddings import router as embeddings_router
 from app.routers.search import router as search_router
@@ -55,10 +52,7 @@ app.add_middleware(LimitUploadSizeMiddleware)
 # ROUTERS
 # -------
 app.include_router(health_router)
-app.include_router(pdf_upload_router)
-app.include_router(pdf_extract_router)
-app.include_router(pdf_list_router)
-app.include_router(pdf_delete_router)
+app.include_router(pdf_router)
 app.include_router(qdrant_health_router)
 app.include_router(embeddings_router)
 app.include_router(search_router)

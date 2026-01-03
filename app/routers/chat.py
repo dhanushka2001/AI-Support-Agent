@@ -1,7 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
+from app.core.errors import file_not_found
 from app.services.search_service import search_similar_chunks
 from app.services.chat_service import (
     rewrite_query,
@@ -13,6 +14,8 @@ from app.services.conversation_service import (
     add_message,
     get_latest_conversation,
     list_conversations,
+    rename_conversation_by_id,
+    delete_conversation_by_id,
 )
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -102,10 +105,29 @@ def get_conversation_messages(conversation_id: str):
     convo = get_conversation(conversation_id)
 
     if not convo:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise file_not_found("Conversation not found")
 
     return {
         "conversation_id": convo["conversation_id"],
         "messages": convo["messages"],
     }
 
+
+@router.patch("/{conversation_id}/rename")
+async def rename_conversation(conversation_id: str, new_title: str):
+    result = rename_conversation_by_id(conversation_id, new_title)
+
+    if result.matched_count == 0:
+        raise file_not_found("Conversation not found")
+    
+    return {"conversation_id": conversation_id, "title": new_title}
+
+
+@router.delete("/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    result = delete_conversation_by_id(conversation_id)
+
+    if result.deleted_count == 0:
+        raise file_not_found("Conversation not found")
+
+    return {"deleted": True}

@@ -26,6 +26,7 @@ function App() {
   const [pdfs, setPdfs] = useState<Pdf[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   
   useEffect(() => {
     const loadLatestConversation = async () => {
@@ -69,12 +70,20 @@ function App() {
   }, []);
 
   
+  useEffect(() => {
+    const handleClickOutside = () => setMenuOpenId(null);
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, []);  
+
   const startNewChat = () => {
     setConversationId(null);
     setMessages([]);
   };
 
   const loadConversation = async (id: string) => {
+    if (id == conversationId) return; // prevent wasteful reload
+
     setConversationId(id);
     setMessages([]);
 
@@ -160,6 +169,70 @@ function App() {
     setPdfs(prev => prev.filter(p => p.file_id !== fileId));
   };
 
+  const openMenu = (e: React.MouseEvent, convo: Conversation) => {
+    e.stopPropagation();
+    setMenuOpenId(convo.conversation_id === menuOpenId ? null : convo.conversation_id);
+  };
+  
+  {/*
+  const openMenu = (e, convo) => {
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+  
+    setMenuPosition({
+      top: rect.top,
+      left: rect.right + 6, // right-offset
+    });
+  
+    setMenuOpenId(convo.conversation_id);
+  };
+  */}
+
+  const handleRename = async (convo: Conversation) => {
+    const newTitle = prompt("Enter new conversation title:", convo.title || "");
+    if (!newTitle) return;
+  
+    const res = await fetch(`http://localhost:8000/chat/${convo.conversation_id}/rename?new_title=${encodeURIComponent(newTitle)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+    });
+  
+    if (res.ok) {
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.conversation_id === convo.conversation_id ? { ...c, title: newTitle } : c
+        )
+      );
+    } else {
+      alert("Failed to rename conversation");
+    }
+  
+    setMenuOpenId(null);
+  };
+  
+  const handleDelete = async (convo: Conversation) => {
+    if (!confirm("Are you sure you want to delete this conversation?")) return;
+  
+    const res = await fetch(`http://localhost:8000/chat/${convo.conversation_id}`, {
+      method: "DELETE",
+    });
+  
+    if (res.ok) {
+      setConversations((prev) =>
+        prev.filter((c) => c.conversation_id !== convo.conversation_id)
+      );
+  
+      // Clear chat panel if this conversation was open
+      if (convo.conversation_id === conversationId) {
+        setConversationId(null);
+        setMessages([]);
+      }
+    } else {
+      alert("Failed to delete conversation");
+    }
+  
+    setMenuOpenId(null);
+  };
 
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "sans-serif" }}>
@@ -182,20 +255,69 @@ function App() {
         </button>
   
 	{/* Conversations list */}
-        {conversations.map((c) => (
-          <div
-            key={c.conversation_id}
+	{conversations.map((c) => (
+	  <div
+	    key={c.conversation_id}
             onClick={() => loadConversation(c.conversation_id)}
-            style={{
-              padding: "6px 8px",
-              cursor: "pointer",
-              background:
-                c.conversation_id === conversationId ? "#aaa" : "transparent",
-            }}
-          >
-            {c.title || "New Chat"}
-          </div>
-        ))}
+	    style={{
+	      display: "flex",
+	      alignItems: "center",
+	      justifyContent: "space-between",
+	      padding: "6px 8px",
+	      cursor: "pointer",
+	      background: c.conversation_id === conversationId ? "#aaa" : "transparent",
+	      position: "relative",
+	    }}
+	  >
+	    {c.title || "New Chat"}
+	
+	    {/* 3-dot menu */}
+	    <span style={{ cursor: "pointer" }}
+		onClick={(e) => {
+		    e.stopPropagation();
+		    openMenu(e, c);
+		}}
+	    >
+	      ⋯
+	    </span>
+	    
+	    {menuOpenId === c.conversation_id && (
+	      <div
+	        style={{
+	          position: "absolute",
+	          background: "#444",
+	          border: "1px solid #ccc",
+		  padding: 4,
+	          top: "100%",
+		  right: 0,
+	          zIndex: 100,
+		  minWidth: 80,
+	        }}
+	      >
+	        <div
+	          style={{ padding: "4px 8px", cursor: "pointer" }}
+	          onClick={(e) => {
+		      e.stopPropagation();
+		      handleRename(c);
+		  }}
+	        >
+	          Rename
+	        </div>
+	        <div
+	          style={{ padding: "4px 8px", cursor: "pointer", color: "red" }}
+	          onClick={(e) => {
+		      e.stopPropagation();
+		      handleDelete(c);
+		  }}
+	        >
+	          Delete
+	        </div>
+	      </div>
+	    )}
+	  </div>
+	))}
+
+
 
 
 	{/* Documents */}
