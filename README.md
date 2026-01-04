@@ -2303,7 +2303,7 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
       │   │   ├── file_storage.py
       │   │   ├── pdf_service.py
       │   │   ├── document_repository.py
-      │   │   └── embedding_service.py
+      │   │   ├── embedding_service.py
       │   │   ├── search_service.py
       │   │   ├── chat_service.py            <-- NEW
       │   │   └── conversation_service.py    <-- NEW
@@ -2528,7 +2528,7 @@ May 14, 2024, Medium, https://medium.com/@amirm.lavasani/how-to-structure-your-f
       │   │   ├── file_storage.py
       │   │   ├── pdf_service.py
       │   │   ├── document_repository.py
-      │   │   └── embedding_service.py
+      │   │   ├── embedding_service.py
       │   │   ├── search_service.py
       │   │   ├── chat_service.py
       │   │   └── conversation_service.py
@@ -3272,7 +3272,7 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
       │   │   ├── file_storage.py
       │   │   ├── pdf_service.py
       │   │   ├── document_repository.py
-      │   │   └── embedding_service.py
+      │   │   ├── embedding_service.py
       │   │   ├── search_service.py
       │   │   ├── chat_service.py
       │   │   └── conversation_service.py
@@ -3607,7 +3607,7 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
         │   │   ├── file_storage.py
         │   │   ├── pdf_service.py
         │   │   ├── document_repository.py
-        │   │   └── embedding_service.py
+        │   │   ├── embedding_service.py
         │   │   ├── search_service.py
         │   │   ├── chat_service.py
         │   │   └── conversation_service.py
@@ -3957,6 +3957,61 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
   * Handle deletion of chunks from Qdrant when an extracted PDF is deleted.
   * Sentiment analysis, key entities extraction, knowledge graph relationships, PDF report generation.
 
+  </details>
+
+* <details><summary> New folder structure </summary>
+
+    ```diff
+      AI-Support-Agent/
+        ├── app/
+        │   ├── main.py
+        │   ├── config.py
+        │   ├── middleware/
+        │   │   ├── logging.py
+        │   │   └── file_size_limit.py
+        │   ├── services/
+        │   │   ├── file_storage.py
+        │   │   ├── pdf_service.py
+        │   │   ├── document_repository.py
+        │   │   ├── embedding_service.py
+        │   │   ├── search_service.py
+        │   │   ├── chat_service.py
+        │   │   └── conversation_service.py
+        │   ├── storage/
+        │   │   └── pdfs/
+        │   ├── core/
+        │   │   ├── errors.py
+        │   │   └── embeddings.py
+        │   ├── routers/
+        │   │   ├── health.py
+    -   │   │   ├── pdf_upload.py
+    -   │   │   ├── pdf_extract.py
+    -   │   │   ├── pdf_delete.py
+    -   │   │   ├── pdf_list.py
+    +   │   │   ├── pdf.py		                 <-- NEW
+        │   │   ├── qdrant_health.py
+        │   │   ├── embeddings.py
+        │   │   ├── search.py
+        │   │   └── chat.py
+        │   └── db/
+        │       ├── mongodb.py
+        │       └── qdrant.py
+        ├── qdrant_data/
+        │   └── ...
+        ├── frontend/
+        │   ├── node_modules/
+        │   │   └── ...
+        │   ├── public/
+        │   │   └── ...
+        │   ├── src/
+        │   │   ├── App.tsx
+        │   │   └── ...
+        │   └── ...
+        ├── .env
+        ├── .gitignore
+        ├── requirements.txt
+        └── README.md
+    ```
   </details>
 
 </details>
@@ -4334,6 +4389,350 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
 
 </details>
 
+<details><summary> Day 19 - 04/01/25 </summary>
+
+## Day 19 - 04/01/25
+
+* <details><summary> Export chat as PDF </summary>
+
+	* Added ``app/services/report_generator.py``:
+
+		```py
+		from reportlab.platypus import (
+						SimpleDocTemplate,
+						Paragraph,
+						Spacer,
+						PageBreak,
+				)
+		from reportlab.lib.styles import getSampleStyleSheet
+		from reportlab.lib.pagesizes import A4
+		from datetime import datetime
+		from pathlib import Path
+		
+		REPORTS_DIR = Path("reports")
+		REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+		
+		
+		def generate_report_pdf(conversation: dict, output_path: str):
+				doc = SimpleDocTemplate(
+						output_path,
+						pagesize=A4,
+						rightMargin=40,
+						leftMargin=40,
+						topMargin=40,
+						bottomMargin=40,
+				)
+		
+				styles = getSampleStyleSheet()
+				story = []
+		
+				# Title
+				story.append(Paragraph(
+						f"<b>{conversation.get('title', 'Conversation Report')}</b>",
+						styles["Title"],
+				))
+				story.append(Spacer(1, 12))
+		
+				# Metadata
+				story.append(Paragraph(
+						f"<b>Conversation ID:</b> {conversation['conversation_id']}",
+						styles["Normal"],
+				))
+		
+				created_at = conversation.get("created_at")
+				updated_at = conversation.get("updated_at")
+		
+				if created_at:
+						story.append(Paragraph(
+								f"<b>Created:</b> {created_at.strftime('%Y-%m-%d %H:%M:%S')}",
+								styles["Normal"],
+						))
+		
+				if updated_at:
+						story.append(Paragraph(
+								f"<b>Last updated:</b> {updated_at.strftime('%Y-%m-%d %H:%M:%S')}",
+								styles["Normal"],
+						))
+		
+				story.append(Spacer(1, 20))
+		
+				# Messages (Q&A)
+				messages = conversation["messages"]
+		
+				for i in range(0, len(messages), 2):
+						user_msg = messages[i]
+						assistant_msg = messages[i + 1] if i + 1 < len(messages) else None
+		
+						story.append(Paragraph(
+								f"<b>Q:</b> {user_msg['content']}",
+								styles["Normal"],
+						))
+						story.append(Spacer(1, 6))
+		
+						if assistant_msg:
+								story.append(Paragraph(
+										f"<b>A:</b> {assistant_msg['content']}",
+										styles["Normal"],
+								))
+		
+						story.append(Spacer(1, 14))
+		
+				doc.build(story)
+		```
+    
+	* Added router to ``app/routers/chat.py``:
+    
+		```py
+		from app.services.report_generator import generate_report_pdf
+		
+		@router.get("/{conversation_id}/report")
+		def generate_report(conversation_id: str):
+				conversation = get_conversation(conversation_id)
+		
+				if not conversation:
+						raise HTTPException(status_code=404, detail="Conversation not found")
+		
+				output_path = f"reports/{conversation_id}.pdf"
+				generate_report_pdf(conversation, output_path)
+		
+				return FileResponse(
+						output_path,
+						media_type="application/pdf",
+						filename="conversation_report.pdf",
+				)
+		```
+
+	* Updated the frontend, ``frontend/src/App.tsx``:
+ 
+		```tsx
+		const exportConvo = async (convo: Conversation) => {
+			const res = await fetch(`http://localhost:8000/chat/${convo.conversation_id}/report`, {
+				method: "GET",
+			});
+		
+			if (!res.ok) {
+				alert("Failed to generate report");
+			}
+		
+			setMenuOpenId(null);
+		};
+		```
+
+	* Updated the dropdown menu in the frontend to include "Export as PDF":
+ 
+		```tsx
+		<div
+			style={{ padding: "4px 8px", cursor: "pointer" }}
+			onClick={(e) => {
+				e.stopPropagation();
+				exportConvo(c);
+			}}
+		>
+			Export as PDF
+		</div>
+		```
+
+	* The result:
+ 
+		* "Export as PDF" option in dropdown menu:
+		
+			<img width="325" height="347" alt="image" src="https://github.com/user-attachments/assets/c3561d97-b903-4277-9301-9448efbfc7e2" />
+		
+		* Generated PDF report using ``reportlab``:
+		
+			<img width="944" height="700" alt="image" src="https://github.com/user-attachments/assets/19bc563d-f7de-4b9d-b0d5-2064f38a422a" />
+
+	* The generated PDFs are stored currently in ``reports/`` which I have added to ``.gitignore``. It would be better if it opened a file explorer for the user to choose where they are saved.
+
+  </details>
+
+* <details><summary> Improve chatbot responses </summary>
+
+	* As mentioned in the previous update, the chatbot's responses seem to not be very good when asking simple questions like _"summarise the points"_.
+ 	* I tried fixing the AI's responses by having the system rewrite the user's query using the prior 4 messages, however this seems to have backfired.
+	* To keep things simple, I have removed the ``rewrite_query()`` step from the pipeline in ``app/routers/chat.py``:
+
+		
+	   	```diff
+			@router.post("")
+			def chat(request: ChatRequest):
+					# 1. Create or reuse conversation
+					conversation_id = request.conversation_id
+					if not conversation_id:
+							conversation_id = create_conversation()
+			
+					# 2. Load previous messages
+					convo = get_conversation(conversation_id)
+					previous_messages = convo["messages"]
+			
+		-	    # 3. Rewrite query
+		-	    rewritten_query = rewrite_query(
+		-	        request.question,
+		-	        previous_messages
+		-	    )
+			
+					# 4. Vector search using rewritten query
+					search_results = search_similar_chunks(
+							request.question,
+		-	        rewritten_query,
+							top_k=request.top_k,
+					)
+					context_chunks = [r["text"] for r in search_results]
+			
+					# 5. Generate answer using rewritten query
+					answer = generate_answer(
+							question=request.question,
+		-	        question=rewritten_query,
+							previous_messages=previous_messages,
+							context_chunks=context_chunks,
+					)
+			
+					# 6. Store new messages
+		-	    rewrite = rewritten_query if rewritten_query != request.question else None
+		-	    add_message(conversation_id, "user", request.question, rewrite)
+					add_message(conversation_id, "user", request.question)
+					add_message(conversation_id, "assistant", answer)
+			
+					# 7. Return response
+					return {
+							"conversation_id": conversation_id,
+							"question": request.question,
+		-	        "rewrite": rewrite,
+							"answer": answer,
+							"chunks_used": len(context_chunks),
+					}
+	    ```
+
+	* Instead of rewriting the user's query using the previous messages for contextual awareness, I instead give the ``generate_answer()`` function the previous messages. So the ``gpt-4o-mini`` model is just run once, with the ``SYSTEM_PROMPT``, relevant document chunks, previous messages, and latest user query all fed as input.
+
+		``app/services/chat_service.py``:
+	
+		```py
+		def generate_answer(question: str, previous_messages: list[dict], context_chunks: list[str]) -> str:
+				if not context_chunks:
+						return "I do not know based on the provided documents."
+		
+				context = "\n\n---\n\n".join(context_chunks)
+		
+				messages = [
+						{
+								"role": "system",
+								"content": SYSTEM_PROMPT
+						},
+						{
+								"role": "system",
+								"content":f"""{context}"""
+						}
+				]
+				
+				if previous_messages:
+						last_n_messages = previous_messages[-4:]
+						
+						for message in last_n_messages:
+								messages.append({
+										"role": message["role"],
+										"content": message.get("rewrite", message["content"])
+								})
+		
+				# append the new question to the message history
+				messages.append({
+						"role": "user",
+						"content": question
+				})
+		
+				response = client.chat.completions.create(
+						model=MODEL,
+						messages=messages,
+						temperature=0.2,  # lower = less creative, more factual
+				)
+		
+				return response.choices[0].message.content
+		```
+
+	* This actually results in much better responses. The AI understands the context better, as it is given everything, rather than the document context and chat context in two separate instances.
+	* I found that when using the ``rewrite_query()`` function, the AI-generated response would try to answer the user's query, rather than rewriting the user's query to make it more contextually aware. This problem is gone now.
+	* Examples of bad responses with the old method:
+
+ 		<img width="649" height="574" alt="image" src="https://github.com/user-attachments/assets/63460256-8b80-4a14-9bb5-822036b9f924" />
+
+		<img width="651" height="289" alt="image" src="https://github.com/user-attachments/assets/fe4d2130-a54f-40bd-86fc-f806058f4e10" />
+
+	* Example of good responses with the new method:
+
+		<img width="654" height="384" alt="image" src="https://github.com/user-attachments/assets/3754e9b4-2ea1-426a-b5c4-3135f7b4d632" />
+
+
+	</details>
+
+* <details><summary> Future additions </summary>
+
+	* Format chatbot response if provided with Markdown/LaTex-style formatting
+	* Possibly add functionality for multiple users, each having their own collection of conversations and documents, and a menu to login?
+ 	* Possibly store qdrant_data/ in MongoDB for persistance across multiple devices?
+ 	* Handle deletion of chunks from Qdrant when an extracted PDF is deleted.
+ 	* Sentiment analysis, key entities extraction, knowledge graph relationships.
+  	* Improve generated PDF report.
+ 	* Add PDF title to extracted text (for context awareness)
+ 	* Make newly created conversation visible in sidebar without needing to refresh
+
+	</details>
+  
+* <details><summary> New folder structure </summary>
+
+    ```diff
+      AI-Support-Agent/
+        ├── app/
+        │   ├── main.py
+        │   ├── config.py
+        │   ├── middleware/
+        │   │   ├── logging.py
+        │   │   └── file_size_limit.py
+        │   ├── services/
+        │   │   ├── file_storage.py
+        │   │   ├── pdf_service.py
+        │   │   ├── document_repository.py
+        │   │   └── embedding_service.py
+        │   │   ├── search_service.py
+        │   │   ├── chat_service.py
+        │   │   ├── conversation_service.py
+    +   │   │   └── report_generator.py			<-- NEW
+        │   ├── storage/
+        │   │   └── pdfs/
+        │   ├── core/
+        │   │   ├── errors.py
+        │   │   └── embeddings.py
+        │   ├── routers/
+        │   │   ├── health.py
+        │   │   ├── pdf.py
+        │   │   ├── qdrant_health.py
+        │   │   ├── embeddings.py
+        │   │   ├── search.py
+        │   │   └── chat.py
+        │   └── db/
+        │       ├── mongodb.py
+        │       └── qdrant.py
+        ├── qdrant_data/
+        │   └── ...
+    +   ├── reports/							<-- NEW
+    +   │   └── ...					    		<-- NEW
+        ├── frontend/
+        │   ├── node_modules/
+        │   │   └── ...
+        │   ├── public/
+        │   │   └── ...
+        │   ├── src/
+        │   │   ├── App.tsx
+        │   │   └── ...
+        │   └── ...
+        ├── .env
+        ├── .gitignore
+        ├── requirements.txt
+        └── README.md
+    ```
+	</details>
+
+</details>
+
 <!--
 <details><summary> Day N - 05/12/25 </summary>
 
@@ -4403,3 +4802,4 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
 -->
 
 ## Citations
+

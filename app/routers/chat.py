@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -17,6 +18,7 @@ from app.services.conversation_service import (
     rename_conversation_by_id,
     delete_conversation_by_id,
 )
+from app.services.report_generator import generate_report_pdf
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -39,34 +41,38 @@ def chat(request: ChatRequest):
     previous_messages = convo["messages"]
 
     # 3. Rewrite query
-    rewritten_query = rewrite_query(
-        request.question,
-        previous_messages
-    )
+    #rewritten_query = rewrite_query(
+    #    request.question,
+    #    previous_messages
+    #)
 
     # 4. Vector search using rewritten query
     search_results = search_similar_chunks(
-        rewritten_query,
+        request.question,
+        #rewritten_query,
         top_k=request.top_k,
     )
     context_chunks = [r["text"] for r in search_results]
 
     # 5. Generate answer using rewritten query
     answer = generate_answer(
-        question=rewritten_query,
+        question=request.question,
+        #question=rewritten_query,
+        previous_messages=previous_messages,
         context_chunks=context_chunks,
     )
 
     # 6. Store new messages
-    rewrite = rewritten_query if rewritten_query != request.question else None
-    add_message(conversation_id, "user", request.question, rewrite)
+    #rewrite = rewritten_query if rewritten_query != request.question else None
+    #add_message(conversation_id, "user", request.question, rewrite)
+    add_message(conversation_id, "user", request.question)
     add_message(conversation_id, "assistant", answer)
 
     # 7. Return response
     return {
         "conversation_id": conversation_id,
         "question": request.question,
-        "rewrite": rewrite,
+        #"rewrite": rewrite,
         "answer": answer,
         "chunks_used": len(context_chunks),
     }
@@ -131,3 +137,20 @@ async def delete_conversation(conversation_id: str):
         raise file_not_found("Conversation not found")
 
     return {"deleted": True}
+
+
+@router.get("/{conversation_id}/report")
+def generate_report(conversation_id: str):
+    conversation = get_conversation(conversation_id)
+
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    output_path = f"reports/{conversation_id}.pdf"
+    generate_report_pdf(conversation, output_path)
+
+    return FileResponse(
+        output_path,
+        media_type="application/pdf",
+        filename="conversation_report.pdf",
+    )

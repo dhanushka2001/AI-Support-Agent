@@ -3,4 +3,5 @@
 .env
 app/storage/
 qdrant_data/
+reports/
 temp.txt

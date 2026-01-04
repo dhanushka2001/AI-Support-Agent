@@ -13,9 +13,9 @@ def create_conversation() -> str:
     db.conversations.insert_one({
         "conversation_id": conversation_id,
         "title": "New chat",
-        "messages": [],
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
+        "messages": [],
     })
     return conversation_id
 
@@ -32,8 +32,8 @@ def get_conversation(conversation_id: str) -> list[dict]:
 def add_message(conversation_id: str, role: str, content: str, rewrite: str | None = None):
     message = {
         "role": role,
-        "content": content,
         "timestamp": datetime.utcnow(),
+        "content": content,
     }
 
     if rewrite:

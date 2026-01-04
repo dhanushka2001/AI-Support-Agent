@@ -288,6 +288,19 @@ function App() {
   };
   
 
+  const exportConvo = async (convo: Conversation) => {
+    const res = await fetch(`http://localhost:8000/chat/${convo.conversation_id}/report`, {
+      method: "GET",
+    });
+  
+    if (!res.ok) {
+      alert("Failed to generate report");
+    }
+  
+    setMenuOpenId(null);
+  };
+  
+
   const deleteConvo = async (convo: Conversation) => {
     if (!confirm("Are you sure you want to delete this conversation?")) return;
   
@@ -381,6 +394,15 @@ function App() {
 		  }}
 	        >
 	          Rename
+	        </div>
+	        <div
+	          style={{ padding: "4px 8px", cursor: "pointer" }}
+	          onClick={(e) => {
+		      e.stopPropagation();
+		      exportConvo(c);
+		  }}
+	        >
+	          Export as PDF
 	        </div>
 	        <div
 	          style={{ padding: "4px 8px", cursor: "pointer", color: "red" }}
