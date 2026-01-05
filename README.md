@@ -4733,6 +4733,46 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
 
 </details>
 
+<details><summary> Day 20 - 05/01/25 </summary>
+
+## Day 20 - 05/01/25
+
+* <details><summary> Display new chat on sidebar immediately </summary>
+
+  * Previously newly created chats would not appear until after refreshing the page.
+  * By adding this line to ``sendMessage`` in ``frontend/src/App.tsx``, the chat appears immediately in the sidebar once the user sends the first message:
+ 
+    ```tsx
+    // If the conversation is not yet in the sidebar, add it
+    setConversations((prev) => {
+      const exists = prev.some(c => c.conversation_id === data.conversation_id);
+      if (!exists) {
+        return [
+          { conversation_id: data.conversation_id, title: data.title || "New Chat" },
+          ...prev,
+        ];
+      }
+      return prev;
+    });
+    ```
+
+    </details>
+
+* <details><summary> Future additions </summary>
+
+	* Format chatbot response if provided with Markdown/LaTex-style formatting
+	* Possibly add functionality for multiple users, each having their own collection of conversations and documents, and a menu to login?
+ 	* Possibly store qdrant_data/ in MongoDB for persistance across multiple devices?
+ 	* Handle deletion of chunks from Qdrant when an extracted PDF is deleted.
+ 	* Sentiment analysis, key entities extraction, knowledge graph relationships.
+  	* Improve generated PDF report.
+ 	* Add PDF title to extracted text (for context awareness)
+
+	</details>
+
+</details>
+
+
 <!--
 <details><summary> Day N - 05/12/25 </summary>
 
@@ -4802,4 +4842,3 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
 -->
 
 ## Citations
-

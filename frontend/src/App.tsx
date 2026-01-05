@@ -77,12 +77,13 @@ function App() {
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);  
 
+  
   const startNewChat = () => {
     setConversationId(null);
     setMessages([]);
   };
-
-
+  
+  
   const loadConversation = async (id: string) => {
     if (id == conversationId) return; // prevent wasteful reload
 
@@ -121,7 +122,20 @@ function App() {
 
     const data = await res.json();
 
+    // Update current conversation
     setConversationId(data.conversation_id);
+
+    // If the conversation is not yet in the sidebar, add it
+    setConversations((prev) => {
+      const exists = prev.some(c => c.conversation_id === data.conversation_id);
+      if (!exists) {
+        return [
+          { conversation_id: data.conversation_id, title: data.title || "New Chat" },
+          ...prev,
+        ];
+      }
+      return prev;
+    });
 
     const assistantMessage: Message = {
       role: "assistant",
