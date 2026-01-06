@@ -100,8 +100,17 @@ function App() {
   const sendMessage = async () => {
     if (!question.trim()) return;
 
+    {/*
     const userMessage: Message = { role: "user", content: question };
     setMessages((prev) => [...prev, userMessage]);
+    */}
+    
+    const userMessageIndex = messages.length
+    setMessages(prev => [
+	...prev,
+	{ role: "user", content: question, emotion: "thinking" }
+    ]);
+
     setQuestion("");
     setLoading(true);
 
@@ -122,6 +131,16 @@ function App() {
 
     const data = await res.json();
 
+    // Update user message
+    setMessages(prev => {
+      const updated = [...prev];
+      updated[userMessageIndex] = {
+        ...updated[userMessageIndex],
+        emotion: data.user_emotion,
+      };
+      return updated;
+    });
+    
     // Update current conversation
     setConversationId(data.conversation_id);
 
@@ -264,21 +283,7 @@ function App() {
     setMenuOpenId(convo.conversation_id === menuOpenId ? null : convo.conversation_id);
   };
   
-  {/*
-  const openMenu = (e, convo) => {
-    e.stopPropagation();
-    const rect = e.currentTarget.getBoundingClientRect();
   
-    setMenuPosition({
-      top: rect.top,
-      left: rect.right + 6, // right-offset
-    });
-  
-    setMenuOpenId(convo.conversation_id);
-  };
-  */}
-
-
   const renameConvo = async (convo: Conversation) => {
     const newTitle = prompt("Enter new conversation title:", convo.title || "");
     if (!newTitle) return;
@@ -337,6 +342,14 @@ function App() {
     }
   
     setMenuOpenId(null);
+  };
+
+
+  const emotionEmoji = {
+    positive: "😊",
+    neutral: "😐",
+    negative: "😟",
+    thinking: "💭",
   };
 
 
@@ -521,7 +534,10 @@ function App() {
         >
           {messages.map((m, i) => (
             <div key={i} style={{ marginBottom: 10 }}>
-              <strong>{m.role === "user" ? "You" : "AI"}:</strong>
+	      <span className="emotion">
+	        {m.role === "user" ? emotionEmoji[m.emotion ?? "thinking"] : "🤖"}
+	      </span>
+              <strong>{m.role === "user" ? " You" : " AI"}:</strong>
               <div>{m.content}</div>
             </div>
           ))}

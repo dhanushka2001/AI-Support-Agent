@@ -2,7 +2,7 @@ from fastapi import HTTPException
 from datetime import datetime
 from uuid import uuid4
 from app.db.mongodb import db
-
+from app.services.sentiment_service import detect_emotion
 
 MAX_MESSAGES = 10  # keep last N messages total
 
@@ -29,15 +29,15 @@ def get_conversation(conversation_id: str) -> list[dict]:
     return convo # could be None if not found
 
 
-def add_message(conversation_id: str, role: str, content: str, rewrite: str | None = None):
+def add_message(conversation_id: str, role: str, content: str, emotion: str | None = None):
     message = {
         "role": role,
         "timestamp": datetime.utcnow(),
         "content": content,
     }
 
-    if rewrite:
-        message["rewrite"] = rewrite
+    if emotion:
+        message["emotion"] = emotion
 
     db.conversations.update_one(
         {"conversation_id": conversation_id},

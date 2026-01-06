@@ -19,6 +19,7 @@ from app.services.conversation_service import (
     delete_conversation_by_id,
 )
 from app.services.report_generator import generate_report_pdf
+from app.services.sentiment_service import detect_emotion
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -40,41 +41,34 @@ def chat(request: ChatRequest):
     convo = get_conversation(conversation_id)
     previous_messages = convo["messages"]
 
-    # 3. Rewrite query
-    #rewritten_query = rewrite_query(
-    #    request.question,
-    #    previous_messages
-    #)
-
-    # 4. Vector search using rewritten query
+    # 3. Vector search
     search_results = search_similar_chunks(
         request.question,
-        #rewritten_query,
         top_k=request.top_k,
     )
     context_chunks = [r["text"] for r in search_results]
 
-    # 5. Generate answer using rewritten query
+    # 4. Generate answer
     answer = generate_answer(
         question=request.question,
-        #question=rewritten_query,
         previous_messages=previous_messages,
         context_chunks=context_chunks,
     )
 
-    # 6. Store new messages
-    #rewrite = rewritten_query if rewritten_query != request.question else None
-    #add_message(conversation_id, "user", request.question, rewrite)
-    add_message(conversation_id, "user", request.question)
+    # 5. Detect emotion
+    emotion = detect_emotion(request.question)
+
+    # 5. Store new messages
+    add_message(conversation_id, "user", request.question, emotion)
     add_message(conversation_id, "assistant", answer)
 
-    # 7. Return response
+    # 6. Return response
     return {
         "conversation_id": conversation_id,
         "question": request.question,
-        #"rewrite": rewrite,
         "answer": answer,
         "chunks_used": len(context_chunks),
+        "user_emotion": emotion,
     }
 
 

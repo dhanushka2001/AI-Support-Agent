@@ -4756,7 +4756,145 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
     });
     ```
 
-    </details>
+  </details>
+
+* <details><summary> Future additions </summary>
+
+  * Format chatbot response if provided with Markdown/LaTex-style formatting
+  * Possibly add functionality for multiple users, each having their own collection of conversations and documents, and a menu to login?
+  * Possibly store qdrant_data/ in MongoDB for persistance across multiple devices?
+  * Handle deletion of chunks from Qdrant when an extracted PDF is deleted.
+  * Sentiment analysis, key entities extraction, knowledge graph relationships.
+  * Improve generated PDF report.
+  * Add PDF title to extracted text (for context awareness)
+
+  </details>
+
+</details>
+
+<details><summary> Day 21 - 06/01/25 </summary>
+
+## Day 21 - 06/01/25
+
+* <details><summary> Emotion/Sentiment detection </summary>
+
+  * Created ``app/services/sentiment_service.py``:
+ 
+    ```py
+    from transformers import pipeline
+
+	sentiment_analyzer = pipeline(
+		"sentiment-analysis",
+		model="distilbert-base-uncased-finetuned-sst-2-english"
+	)
+	
+	
+	def detect_emotion(text: str) -> str:
+		result = sentiment_analyzer(text)[0]
+		label = result["label"]
+		score = result["score"]
+	
+		if label == "POSITIVE" and score > 0.6:
+			return "positive"
+		elif label == "NEGATIVE" and score > 0.6:
+			return "negative"
+		else:
+			return "neutral"
+	```
+
+  * Added ``transformers`` to ``requirements.txt``, and ran:
+ 
+    ```cmd
+    pip install transformers
+    ```
+
+  * Added this to ``add_message()`` in ``app/services/conversation_service.py``:
+ 
+    ```py
+    if role == "user":
+        message["emotion"] = detect_emotion(content)
+    ```
+
+  </details>
+
+* <details><summary> UI Emotion Indicator </summary>
+
+  * Added this to ``frontend/src/App.tsx``:
+ 
+    ```tsx
+	const emotionEmoji = {
+	  positive: "😊",
+	  neutral: "😐",
+	  negative: "😟",
+	};
+    ```
+
+	```diff
+	  {messages.map((m, i) => (
+		<div key={i} style={{ marginBottom: 10 }}>
+	+ <span className="emotion">
+	+	{m.role === "user" ? emotionEmoji[m.emotion ?? "neutral"] : "🤖"}
+	+ </span>
+		  <strong>{m.role === "user" ? " You" : " AI"}:</strong>
+		  <div>{m.content}</div>
+		</div>
+	  ))}
+  	```
+
+  * The emoticons only appear on refresh though. To make them appear immediately, I added this to ``frontend/src/App.tsx``:
+ 
+    ```diff
+	  const emotionEmoji = {
+	    positive: "😊",
+	    neutral: "😐",
+	    negative: "😟",
+	+   thinking: "💭",
+	  };
+    ```
+
+    ```diff
+	  <span className="emotion">
+    -   {m.role === "user" ? emotionEmoji[m.emotion ?? "neutral"] : "🤖"}
+	+	{m.role === "user" ? emotionEmoji[m.emotion ?? "thinking"] : "🤖"}
+	  </span>
+    ```
+
+  * Added to ``const sendMessage = async () => { ...``:
+ 
+    ```diff
+	-   const userMessage: Message = { role: "user", content: question };
+	-   setMessages((prev) => [...prev, userMessage]);   
+	+   const userMessageIndex = messages.length
+	+   setMessages(prev => [
+	+       ...prev,
+	+	    { role: "user", content: question, emotion: "thinking" }
+	+   ]);
+	```
+
+    ```diff
+	    const data = await res.json();
+	
+	+   // Update user message
+	+   setMessages(prev => {
+	+     const updated = [...prev];
+	+     updated[userMessageIndex] = {
+	+       ...updated[userMessageIndex],
+	+       emotion: data.user_emotion,
+	+     };
+	+     return updated;
+	+   });
+    ```
+  
+  * The result:
+    * Thinking:
+
+      <img width="699" height="379" alt="image" src="https://github.com/user-attachments/assets/c234957f-aa8c-4818-bf34-3baab0cec278" />
+
+	* Correctly detected emotion displayed:
+ 
+      <img width="691" height="428" alt="image" src="https://github.com/user-attachments/assets/08ff850f-1493-47cb-a8fa-e2a8779d91ce" />
+
+  </details>
 
 * <details><summary> Future additions </summary>
 
@@ -4768,7 +4906,7 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
   	* Improve generated PDF report.
  	* Add PDF title to extracted text (for context awareness)
 
-	</details>
+  </details>
 
 </details>
 
