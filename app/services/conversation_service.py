@@ -2,7 +2,6 @@ from fastapi import HTTPException
 from datetime import datetime
 from uuid import uuid4
 from app.db.mongodb import db
-from app.services.sentiment_service import detect_emotion
 
 MAX_MESSAGES = 10  # keep last N messages total
 

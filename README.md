@@ -4691,7 +4691,7 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
         │   │   ├── file_storage.py
         │   │   ├── pdf_service.py
         │   │   ├── document_repository.py
-        │   │   └── embedding_service.py
+        │   │   ├── embedding_service.py
         │   │   ├── search_service.py
         │   │   ├── chat_service.py
         │   │   ├── conversation_service.py
@@ -4811,8 +4811,36 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
   * Added this to ``add_message()`` in ``app/services/conversation_service.py``:
  
     ```py
-    if role == "user":
-        message["emotion"] = detect_emotion(content)
+    def add_message(conversation_id: str, role: str, content: str, emotion: str | None = None):
+    	...
+	    if role == "user":
+	        message["emotion"] = detect_emotion(content)
+    	...
+    ```
+
+  * And lastly added this to the ``POST /chat`` router in ``app/routers/chat.py``:
+ 
+    ```py
+    from app.services.sentiment_service import detect_emotion
+
+	@router.post("")
+	def chat(request: ChatRequest):
+		...
+    	# 5. Detect emotion
+	    emotion = detect_emotion(request.question)
+
+    	# 6. Store new messages
+    	add_message(conversation_id, "user", request.question, emotion)
+    	...
+
+    	# 7. Return response
+	    return {
+	        "conversation_id": conversation_id,
+	        "question": request.question,
+	        "answer": answer,
+	        "chunks_used": len(context_chunks),
+	        "user_emotion": emotion,
+	    }
     ```
 
   </details>
@@ -4896,17 +4924,272 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
 
   </details>
 
+* <details><summary> Fixing sentiment output </summary>
+
+  * I noticed that the sentiment analyzer was not doing a good job detecting ``neutral`` text.
+  * For this reason I decided to switch the model, as the current one I was using, ``distilbert-base-uncased-finetuned-sst-2-english``, had just a binary output, and was not designed to detect ``neutral``, only ``positive`` and ``negative``.
+  * Going to the **HuggingFace** website and searching for ``text-classification`` models, and sorting by "Most downloads", I found ``cardiffnlp/twitter-roberta-base-sentiment-latest``.
+  * I added the new model like so:
+ 
+    ```py
+    model_path = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+    # model_path = "distilbert-base-uncased-finetuned-sst-2-english"
+
+	sentiment_analyzer = pipeline(
+	    "sentiment-analysis",
+	    model=model_path,
+	    tokenizer=model_path
+	)
+	```
+
+  * However, when I tried this time, it now seemed to always return ``neutral``...
+  * After spending a few minutes, I realized the issue was that in the old model, the labels were all caps (``POSITIVE``, ``NEGATIVE``). However, the new model's labels were capitalized (``Positive``, ``Negative``, ``Neutral``).
+  * After fixing this sneaky annoying bug like so:
+ 
+    ```py
+	def detect_emotion(text: str) -> str:
+	    result = sentiment_analyzer(text)[0]
+	    label = result["label"]
+	    score = result["score"]
+	
+	    if label.lower() == "POSITIVE".lower() and score > 0.5:
+	        return "positive"
+	    elif label.lower() == "NEGATIVE".lower() and score > 0.5:
+	        return "negative"
+	    else:
+	        return "neutral"
+    ```
+
+  	the system now seems to work as expected, correctly classifying ``positive``, ``neutral``, and ``negative`` text. After tinkering I found that a threshold of ``0.5`` seems to work well, I might lower it though.
+
+	<img width="690" height="473" alt="image" src="https://github.com/user-attachments/assets/68e1663f-dae1-460e-bcf8-c445d84f8a17" />
+
+  </details>
+
+* <details><summary> Sentiment summary and pie chart </summary>
+
+  * To get a simple sentiment summary, I added this to ``app/services/report_generator.py``:
+ 
+    ```py
+    # Emotion overall count
+    emotion_count = 0
+    emotion_tally = [0, 0, 0]
+    emotion_emojis = [":)", ":|", ":("]
+    emoji = emotion_emojis[0]
+    emotion_flag = False # check if there are any emotions saved
+
+	n_user_messages = len(messages) / 2
+    
+    for i in range(0, len(messages), 2):
+        user_msg = messages[i]
+        assistant_msg = messages[i + 1] if i + 1 < len(messages) else None
+
+        user_emotion = user_msg.get("emotion")
+    	if user_emotion: emotion_flag = True
+
+        if user_emotion:
+            if user_emotion == "positive":
+                emotion_count += 1
+                emotion_tally[0] += 1
+                emoji = emotion_emojis[0]
+            elif user_emotion == "neutral":
+                emotion_count += 0
+                emotion_tally[1] += 1
+                emoji = emotion_emojis[1]
+            else:
+                emotion_count -= 1
+                emotion_tally[2] += 1
+                emoji = emotion_emojis[2]
+
+
+        story.append(Paragraph(
+            f"<b>You:</b> {user_msg['content']} [<b>{emoji}</b>]",
+            styles["Normal"],
+        ))
+        story.append(Spacer(1, 6))
+
+        if assistant_msg:
+            story.append(Paragraph(
+                f"<b>AI:</b> {assistant_msg['content']}",
+                styles["Normal"],
+            ))
+
+        story.append(Spacer(1, 14))
+
+
+    story.append(Spacer(1, 6))
+    
+    # Sentiment summary
+    if emotion_count > 1:
+        story.append(Paragraph(
+            f"<b>Sentiment summary:</b> The conversation maintained a generally positive tone, indicating engagement and confidence.",
+            styles["Normal"],
+        ))
+    elif emotion_count < -1:
+        story.append(Paragraph(
+            f"<b>Sentiment summary:</b> The conversation maintained a generally negative tone, indicating signs of frustration and lack of engagement.",
+            styles["Normal"],
+        ))
+    else:
+        story.append(Paragraph(
+            f"<b>Sentiment summary:</b> The conversation remained largely neutral and informational in tone, neither positive nor negative.",
+            styles["Normal"],
+        ))
+    ```
+
+  * To add a simple Pie Chart, I used the ``reportlab``'s docs which had sample code for a basic Pie Chart.[^23] I copied that over, modifying the code for my use-case and also just made the code cleaner, using a dictionary to store colors:
+ 
+    [^23]: ReportLab Chart Galleries - Basic Pie, https://www.reportlab.com/chartgallery/pie/PieChart02/?iframe=true&width=900&height=500&ajax=true
+ 
+    ```py
+	# For Basic Pie chart
+	from reportlab.graphics.charts.legends import Legend
+	from reportlab.graphics.charts.piecharts import Pie
+	from reportlab.pdfbase.pdfmetrics import stringWidth, EmbeddedType1Face, registerTypeFace, Font, registerFont
+	from reportlab.graphics.shapes import Drawing, _DrawingEditorMixin
+	from reportlab.lib.colors import Color, PCMYKColor, white
+
+
+	# https://www.reportlab.com/chartgallery/pie/PieChart02/?iframe=true&width=900&height=500&ajax=true 
+	class PieChart02(_DrawingEditorMixin, Drawing):
+	    '''
+	        A Pie Chart
+	        ===========
+	
+	        This is a simple pie chart that contains a basic legend.
+	    '''
+	    def __init__(self,emotion_tally,n_user_messages,width=400,height=200,*args,**kw):
+	        Drawing.__init__(self,width,height,*args,**kw)
+	        fontSize    = 8
+	        fontName    = 'Helvetica'
+	        #title
+	        # self.titleText = "User sentiment"
+	        #pie
+	        self._add(self,Pie(),name='pie',validate=None,desc=None)
+	        self.pie.strokeWidth            = 1
+	        self.pie.slices.strokeColor     = PCMYKColor(0,0,0,0)
+	        self.pie.slices.strokeWidth     = 1
+	        #legend
+	        self._add(self,Legend(),name='legend',validate=None,desc=None)
+	        self.legend.columnMaximum       = 99
+	        self.legend.alignment='right'
+	        self.legend.dx                  = 6
+	        self.legend.dy                  = 6
+	        self.legend.dxTextSpace         = 5
+	        self.legend.deltay              = 10
+	        self.legend.strokeWidth         = 0
+	        self.legend.subCols[0].minWidth = 75
+	        self.legend.subCols[0].align = 'left'
+	        self.legend.subCols[1].minWidth = 25
+	        self.legend.subCols[1].align = 'right'
+	        self.pie.data = [x * 100/n_user_messages for x in emotion_tally]
+	        self.height      = 200
+	        self.legend.boxAnchor           = 'c'
+	        self.legend.y                   = 100
+	        colors = {
+	            "green":      PCMYKColor(100,0,90,50,alpha=100),
+	            "blue":       PCMYKColor(100,60,0,50,alpha=100),
+	            "red":        PCMYKColor(0,100,100,40,alpha=100),
+	            "light blue": PCMYKColor(66,13,0,22,alpha=100),
+	            "white":      PCMYKColor(0,0,0,0,alpha=100)
+	        }
+	        self.pie.strokeColor            = colors["white"]
+	        self.pie.slices[0].fillColor    = colors["green"]
+	        self.pie.slices[1].fillColor    = colors["blue"]
+	        self.pie.slices[2].fillColor    = colors["red"]
+	        # self.pie.slices[3].fillColor  = colors["light blue"]
+	        self.legend.colorNamePairs = [
+	            (colors["green"], ('Positive', '{0:.1f}%'.format(self.pie.data[2]))),
+	            (colors["blue"], ('Neutral',  '{0:.1f}%'.format(self.pie.data[1]))),
+	            (colors["red"], ('Negative', '{0:.1f}%'.format(self.pie.data[0]))),
+	        ]
+	        self.width                = 400
+	        self.legend.x             = 350
+	        self.pie.width            = 150
+	        self.pie.height           = 150
+	        self.pie.y                = 25
+	        self.pie.x                = 25
+    ```
+
+    and adding this to ``generate_report_pdf()``:
+
+  	```py
+   	if emotion_flag:
+        story.append(PieChart02(emotion_tally, n_user_messages))
+   	```
+
+  * The result:
+
+    <img width="1362" height="512" alt="image" src="https://github.com/user-attachments/assets/341b59a9-8a10-412a-88e1-eaf194f7dd18" />
+
+  </details>
+
 * <details><summary> Future additions </summary>
 
 	* Format chatbot response if provided with Markdown/LaTex-style formatting
 	* Possibly add functionality for multiple users, each having their own collection of conversations and documents, and a menu to login?
- 	* Possibly store qdrant_data/ in MongoDB for persistance across multiple devices?
+ 	* Possibly store qdrant_data/ in MongoDB for persistence across multiple devices?
  	* Handle deletion of chunks from Qdrant when an extracted PDF is deleted.
- 	* Sentiment analysis, key entities extraction, knowledge graph relationships.
-  	* Improve generated PDF report.
+ 	* Key entities extraction, knowledge graph relationships.
+  	* Add more to generated PDF report.
  	* Add PDF title to extracted text (for context awareness)
 
   </details>
+
+* <details><summary> New folder structure </summary>
+
+    ```diff
+      AI-Support-Agent/
+        ├── app/
+        │   ├── main.py
+        │   ├── config.py
+        │   ├── middleware/
+        │   │   ├── logging.py
+        │   │   └── file_size_limit.py
+        │   ├── services/
+        │   │   ├── file_storage.py
+        │   │   ├── pdf_service.py
+        │   │   ├── document_repository.py
+        │   │   ├── embedding_service.py
+        │   │   ├── search_service.py
+        │   │   ├── chat_service.py
+        │   │   ├── conversation_service.py
+        │   │   ├── report_generator.py
+    +   │   │   └── sentiment_service.py			<-- NEW
+        │   ├── storage/
+        │   │   └── pdfs/
+        │   ├── core/
+        │   │   ├── errors.py
+        │   │   └── embeddings.py
+        │   ├── routers/
+        │   │   ├── health.py
+        │   │   ├── pdf.py
+        │   │   ├── qdrant_health.py
+        │   │   ├── embeddings.py
+        │   │   ├── search.py
+        │   │   └── chat.py
+        │   └── db/
+        │       ├── mongodb.py
+        │       └── qdrant.py
+        ├── qdrant_data/
+        │   └── ...
+        ├── reports/
+        │   └── ...
+        ├── frontend/
+        │   ├── node_modules/
+        │   │   └── ...
+        │   ├── public/
+        │   │   └── ...
+        │   ├── src/
+        │   │   ├── App.tsx
+        │   │   └── ...
+        │   └── ...
+        ├── .env
+        ├── .gitignore
+        ├── requirements.txt
+        └── README.md
+    ```
+	</details>
 
 </details>
 

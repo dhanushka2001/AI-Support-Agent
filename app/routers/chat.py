@@ -58,11 +58,11 @@ def chat(request: ChatRequest):
     # 5. Detect emotion
     emotion = detect_emotion(request.question)
 
-    # 5. Store new messages
+    # 6. Store new messages
     add_message(conversation_id, "user", request.question, emotion)
     add_message(conversation_id, "assistant", answer)
 
-    # 6. Return response
+    # 7. Return response
     return {
         "conversation_id": conversation_id,
         "question": request.question,

@@ -20,7 +20,8 @@ from reportlab.pdfbase.pdfmetrics import stringWidth, EmbeddedType1Face, registe
 from reportlab.graphics.shapes import Drawing, _DrawingEditorMixin
 from reportlab.lib.colors import Color, PCMYKColor, white
 
-emotion_tally = [0, 0, 0]
+#emotion_tally = [0, 0, 0]
+#n_user_messages = 0
 
 
 def generate_report_pdf(conversation: dict, output_path: str):
@@ -71,11 +72,14 @@ def generate_report_pdf(conversation: dict, output_path: str):
 
     # Emotion overall count
     emotion_count = 0
-    # emotion_tally = [0, 0, 0]  # [happy, neutral, sad]
+    emotion_tally = [0, 0, 0]
     # emotion_emojis = ["😊", "😐", "😟", "🤖"]  # [happy, neutral, sad, robot]
     emotion_emojis = [":)", ":|", ":("]
     emoji = emotion_emojis[0]
+    emotion_flag = False # check if there are any emotions saved
 
+    n_user_messages = len(messages)/ 2
+    
     for i in range(0, len(messages), 2):
         user_msg = messages[i]
         assistant_msg = messages[i + 1] if i + 1 < len(messages) else None
@@ -83,6 +87,7 @@ def generate_report_pdf(conversation: dict, output_path: str):
         user_emotion = user_msg.get("emotion")
 
         if user_emotion:
+            emotion_flag = True
             if user_emotion == "positive":
                 emotion_count += 1
                 emotion_tally[0] += 1
@@ -115,25 +120,26 @@ def generate_report_pdf(conversation: dict, output_path: str):
     story.append(Spacer(1, 6))
     
     # Sentiment summary
-    if emotion_count > 2:
+    if emotion_count > 1:
         story.append(Paragraph(
             f"<b>Sentiment summary:</b> The conversation maintained a generally positive tone, indicating engagement and confidence.",
             styles["Normal"],
         ))
-    elif emotion_count < -2:
+    elif emotion_count < -1:
         story.append(Paragraph(
             f"<b>Sentiment summary:</b> The conversation maintained a generally negative tone, indicating signs of frustration and lack of engagement.",
             styles["Normal"],
         ))
     else:
         story.append(Paragraph(
-            f"<b>Sentiment summary:</b> The conversation remained largely neutral and informational in tone, neither positive nor negative.",
+            f"<b>Sentiment summary:</b> The conversation remained mostly neutral and balanced, neither overly positive nor negative.",
             styles["Normal"],
         ))
 
     story.append(Spacer(1, 2))
 
-    story.append(PieChart02())
+    if emotion_flag:
+        story.append(PieChart02(emotion_tally, n_user_messages))
 
 
     doc.build(story)
@@ -147,7 +153,7 @@ class PieChart02(_DrawingEditorMixin, Drawing):
 
         This is a simple pie chart that contains a basic legend.
     '''
-    def __init__(self,width=400,height=200,*args,**kw):
+    def __init__(self,emotion_tally, n_user_messages,width=400,height=200,*args,**kw):
         Drawing.__init__(self,width,height,*args,**kw)
         fontSize    = 8
         fontName    = 'Helvetica'
@@ -171,8 +177,7 @@ class PieChart02(_DrawingEditorMixin, Drawing):
         self.legend.subCols[0].align = 'left'
         self.legend.subCols[1].minWidth = 25
         self.legend.subCols[1].align = 'right'
-        self.pie.data = [x * 100/5 for x in emotion_tally]
-        for i in range(len(self.pie.data)): self.pie.slices[i].fillColor = colors[i]
+        self.pie.data = [x * 100/n_user_messages for x in emotion_tally]
         self.height      = 200
         self.legend.boxAnchor           = 'c'
         self.legend.y                   = 100
@@ -189,9 +194,9 @@ class PieChart02(_DrawingEditorMixin, Drawing):
         self.pie.slices[2].fillColor    = colors["red"]
         # self.pie.slices[3].fillColor  = colors["light blue"]
         self.legend.colorNamePairs = [
-            (colors["green"], ('Positive', '{0:.1f}%'.format(emotion_tally[2]))),
-            (colors["blue"], ('Neutral',  '{0:.1f}%'.format(emotion_tally[1]))),
-            (colors["red"], ('Negative', '{0:.1f}%'.format(emotion_tally[0]))),
+            (colors["green"], ('Positive', '{0:.1f}%'.format(self.pie.data[2]))),
+            (colors["blue"], ('Neutral',  '{0:.1f}%'.format(self.pie.data[1]))),
+            (colors["red"], ('Negative', '{0:.1f}%'.format(self.pie.data[0]))),
         ]
         self.width                = 400
         self.legend.x             = 350
