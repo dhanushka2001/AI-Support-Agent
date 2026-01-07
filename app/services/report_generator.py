@@ -194,9 +194,9 @@ class PieChart02(_DrawingEditorMixin, Drawing):
         self.pie.slices[2].fillColor    = colors["red"]
         # self.pie.slices[3].fillColor  = colors["light blue"]
         self.legend.colorNamePairs = [
-            (colors["green"], ('Positive', '{0:.1f}%'.format(self.pie.data[2]))),
+            (colors["green"], ('Positive', '{0:.1f}%'.format(self.pie.data[0]))),
             (colors["blue"], ('Neutral',  '{0:.1f}%'.format(self.pie.data[1]))),
-            (colors["red"], ('Negative', '{0:.1f}%'.format(self.pie.data[0]))),
+            (colors["red"], ('Negative', '{0:.1f}%'.format(self.pie.data[2]))),
         ]
         self.width                = 400
         self.legend.x             = 350
