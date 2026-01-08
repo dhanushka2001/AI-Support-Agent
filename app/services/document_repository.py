@@ -38,6 +38,22 @@ def store_extracted_text(file_id: str, text: str):
         raise ValueError("Document not found")
 
 
+def store_extracted_entities(file_id: str, entities: dict, entity_edges: list):
+    result = documents_collection.update_one(
+        {"file_id": file_id},
+        {
+            "$set": {
+                "entities": entities,
+		"entity_edges": entity_edges,
+		"entities_extracted_at": datetime.utcnow()
+            }
+        }
+    )
+
+    if result.matched_count == 0:
+        raise ValueError("Document not found")
+
+
 def update_embed_status(file_id: str, count: int):
     result = documents_collection.update_one(
         {"file_id": file_id},

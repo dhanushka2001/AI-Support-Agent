@@ -4928,7 +4928,10 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
 
   * I noticed that the sentiment analyzer was not doing a good job detecting ``neutral`` text.
   * For this reason I decided to switch the model, as the current one I was using, ``distilbert-base-uncased-finetuned-sst-2-english``, had just a binary output, and was not designed to detect ``neutral``, only ``positive`` and ``negative``.
-  * Going to the **HuggingFace** website and searching for ``text-classification`` models, and sorting by "Most downloads", I found ``cardiffnlp/twitter-roberta-base-sentiment-latest``.
+  * Going to the **HuggingFace** website and searching for ``text-classification`` models, and sorting by "Most downloads", I found ``cardiffnlp/twitter-roberta-base-sentiment-latest``.[^23]
+ 
+	[^23]: Hugging Face - Twitter-roBERTa-base for Sentiment Analysis - UPDATED (2022), https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest
+
   * I added the new model like so:
  
     ```py
@@ -5037,9 +5040,9 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
         ))
     ```
 
-  * To add a simple Pie Chart, I used the ``reportlab``'s docs which had sample code for a basic Pie Chart.[^23] I copied that over, modifying the code for my use-case and also just made the code cleaner, using a dictionary to store colors:
+  * To add a simple Pie Chart, I used the ``reportlab``'s docs which had sample code for a basic Pie Chart.[^24] I copied that over, modifying the code for my use-case and also just made the code cleaner, using a dictionary to store colors:
  
-    [^23]: ReportLab Chart Galleries - Basic Pie, https://www.reportlab.com/chartgallery/pie/PieChart02/?iframe=true&width=900&height=500&ajax=true
+    [^24]: ReportLab Chart Galleries - Basic Pie, https://www.reportlab.com/chartgallery/pie/PieChart02/?iframe=true&width=900&height=500&ajax=true
  
     ```py
 	# For Basic Pie chart
@@ -5193,6 +5196,301 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
 
 </details>
 
+<details><summary> Day 22 - 07/01/25 </summary>
+
+## Day 22 - 07/01/25
+
+* <details><summary> Entity Extraction </summary>
+
+  * For named entity recognition I am using ``spaCy NER``. Firstly, I added ``spacy`` to ``requirements.txt``.
+  * ``spaCy`` requires you install ``wheel``, so I added that to ``requirements.txt`` above ``spacy``.
+  * And lastly, I added the wheel URL for the model to ``requirements.txt``:
+ 
+    ```txt
+    wheel
+	spacy
+	en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
+    ```
+    
+  * Ran:
+
+	```cmd
+  	python -m pip install -r requirements.txt
+	```
+
+  * Made a new file, ``app/services/entity_extractor.py``, which uses ``spaCy NER`` to do entity extraction:
+ 
+    ```py
+    import spacy
+	from collections import defaultdict
+	
+	nlp = spacy.load("en_core_web_sm")
+	
+	ALLOWED_LABELS = {
+	    "PERSON", "ORG", "GPE", "DATE",
+	    "PERCENT", "CARDINAL", "PRODUCT"
+	}
+	
+	def extract_entities(text: str) -> dict:
+	    doc = nlp(text)
+	    entities = defaultdict(set)
+	
+	    for ent in doc.ents:
+	        if ent.label_ in ALLOWED_LABELS:
+	            entities[ent.label_].add(ent.text)
+	
+	    # convert sets to sorted lists
+	    return {k: sorted(list(v)) for k, v in entities.items()}
+    ```
+
+  * In ``app/services/document_repository.py`` I made a new function to store extracted entities:
+ 
+    ```py
+	def store_extracted_entities(file_id: str, entities: dict, entity_edges: list):
+	    result = documents_collection.update_one(
+	        {"file_id": file_id},
+	        {
+	            "$set": {
+	                "entities": entities,
+			"entities_extracted_at": datetime.utcnow()
+	            }
+	        }
+	    )
+	
+	    if result.matched_count == 0:
+	        raise ValueError("Document not found")
+    ```
+
+  * And lastly, in ``app/routers/pdf.py``, I added this to the ``POST /extract/{file_id}`` endpoint:
+ 
+    ```py
+    from app.services.entity_extractor import extract_entities
+
+    @router.post("/extract/{file_id}")
+	def extract_pdf_text(file_id: str):
+    	...
+    	try:
+    		...
+    		entities = extract_entities
+    		store_extracted_entities(file_id, entities)
+    		...
+    	...
+    ```
+
+  * Now, when a PDF is uploaded, the extracted entities are stored in MongoDB:
+ 
+    <img width="589" height="454" alt="image" src="https://github.com/user-attachments/assets/d24e77ae-eb6a-434b-8c72-71ee7fee009d" />
+
+  </details>
+
+* <details><summary> Knowledge Graph Relationships </summary>
+
+  * To get basic relationships between extracted entities, I decided to just link entities in the same sentences.
+  * To do this, I needed a way to split the extracted text into sentences. I found a Stack Overflow post which provided code to do just that, which seems to handle edge cases better than other methods:[^25]
+ 
+    [^25]: How can I split a text into sentences?, Stack Overflow, https://stackoverflow.com/a/31505798
+ 
+    ```py
+	# -*- coding: utf-8 -*-
+	import re
+	alphabets= "([A-Za-z])"
+	prefixes = "(Mr|St|Mrs|Ms|Dr)[.]"
+	suffixes = "(Inc|Ltd|Jr|Sr|Co|Plc)"
+	starters = "(Mr|Mrs|Ms|Dr|Prof|Capt|Cpt|Lt|He\s|She\s|It\s|They\s|Their\s|Our\s|We\s|But\s|However\s|That\s|This\s|Wherever)"
+	acronyms = "([A-Z][.][A-Z][.](?:[A-Z][.])?)"
+	websites = "[.](com|net|org|io|gov|edu|me)"
+	digits = "([0-9])"
+	multiple_dots = r'\.{2,}'
+
+	# https://stackoverflow.com/a/31505798 
+	def split_into_sentences(text: str) -> list[str]:
+	    """
+	    Split the text into sentences.
+	
+	    If the text contains substrings "<prd>" or "<stop>", they would lead 
+	    to incorrect splitting because they are used as markers for splitting.
+	
+	    :param text: text to be split into sentences
+	    :type text: str
+	
+	    :return: list of sentences
+	    :rtype: list[str]
+	    """
+	    text = " " + text + "  "
+	    text = text.replace("\n"," ")
+	    text = re.sub(prefixes,"\\1<prd>",text)
+	    text = re.sub(websites,"<prd>\\1",text)
+	    text = re.sub(digits + "[.]" + digits,"\\1<prd>\\2",text)
+	    text = re.sub(multiple_dots, lambda match: "<prd>" * len(match.group(0)) + "<stop>", text)
+	    if "Ph.D" in text: text = text.replace("Ph.D.","Ph<prd>D<prd>")
+	    text = re.sub("\s" + alphabets + "[.] "," \\1<prd> ",text)
+	    text = re.sub(acronyms+" "+starters,"\\1<stop> \\2",text)
+	    text = re.sub(alphabets + "[.]" + alphabets + "[.]" + alphabets + "[.]","\\1<prd>\\2<prd>\\3<prd>",text)
+	    text = re.sub(alphabets + "[.]" + alphabets + "[.]","\\1<prd>\\2<prd>",text)
+	    text = re.sub(" "+suffixes+"[.] "+starters," \\1<stop> \\2",text)
+	    text = re.sub(" "+suffixes+"[.]"," \\1<prd>",text)
+	    text = re.sub(" " + alphabets + "[.]"," \\1<prd>",text)
+	    if "”" in text: text = text.replace(".”","”.")
+	    if "\"" in text: text = text.replace(".\"","\".")
+	    if "!" in text: text = text.replace("!\"","\"!")
+	    if "?" in text: text = text.replace("?\"","\"?")
+	    text = text.replace(".",".<stop>")
+	    text = text.replace("?","?<stop>")
+	    text = text.replace("!","!<stop>")
+	    text = text.replace("<prd>",".")
+	    sentences = text.split("<stop>")
+	    sentences = [s.strip() for s in sentences]
+	    if sentences and not sentences[-1]: sentences = sentences[:-1]
+	    return sentences
+    ```
+
+  * Added a function to ``app/services/entity_extractor`` to extract entities per sentence from extracted PDF text, and store them in a list:
+ 
+    ```py
+	def extract_sentence_entity_edges(text: str) -> list[dict]:
+	    sentences = split_into_sentences(text)
+	    edges = []
+	
+	    for idx, sentence in enumerate(sentences):
+	        entities = defaultdict(set)
+	        doc = nlp(sentence)
+	
+	        for ent in doc.ents:
+	            if ent.label_ in ALLOWED_LABELS:
+	                entities[ent.label_].add(ent.text)
+	
+	        if entities:
+	            edges.append({
+	                "sentence_index": idx,
+	                "entities": {
+	                    label: sorted(list(values))
+	                    for label, values in entities.items()
+	                }
+	            })
+	
+	    return edges
+    ```
+
+  * Added to ``store_extracted_entities(...)`` in ``app/services/document_repository.py``:
+ 
+    ```diff
+    -	def store_extracted_entities(file_id: str, entities: dict):
+	+	def store_extracted_entities(file_id: str, entities: dict, entity_edges: list):
+			result = documents_collection.update_one(
+				{"file_id": file_id},
+				{
+					"$set": {
+						"entities": entities,
+	+					"entity_edges": entity_edges,
+						"entities_extracted_at": datetime.utcnow()
+					}
+				}
+			)
+		
+			if result.matched_count == 0:
+				raise ValueError("Document not found")
+    ```
+
+  * Added to ``POST /extract/{file_id}`` router in ``app/routers/pdf.py``:
+ 
+    ```diff
+	    from app.services.entity_extractor import (
+		    extract_entities,
+	+	    extract_sentence_entity_edges,
+		)
+
+		@router.post("/extract/{file_id}")
+		def extract_pdf_text(file_id: str):
+			...	
+		    try:
+				...
+	            entities = extract_entities(text)
+	+	        entity_edges = extract_sentence_entity_edges(text)
+	+	        store_extracted_entities(file_id, entities, entity_edges)  # MongoDB
+				...
+    		...
+    ```
+
+  * Now when uploading a PDF, it stores JSON edges for entities in the PDF:
+ 
+    <img width="479" height="531" alt="image" src="https://github.com/user-attachments/assets/3b5e6d34-35f0-4a22-a53d-c25631fa1a88" />
+
+  * ``spaCy NER`` does a decent job, but it's far from perfect. We could use an LLM to pick out the key entities and their relationships between other entities, which would do a better job, but that would use up a lot of tokens.
+
+  </details>
+
+* <details><summary> Future additions </summary>
+
+	* Format chatbot response if provided with Markdown/LaTex-style formatting
+	* Possibly add functionality for multiple users, each having their own collection of conversations and documents, and a menu to login?
+ 	* Possibly store qdrant_data/ in MongoDB for persistence across multiple devices?
+ 	* Handle deletion of chunks from Qdrant when an extracted PDF is deleted.
+  	* Add more to generated PDF report.
+ 	* Add PDF title to extracted text (for context awareness)
+    * Provide previous messages as input when searching for relevant chunks, rather than just the user's query.
+    * Store the ``file_id``'s for all the PDFs that were used in the conversation as context chunks (can store them in MongoDB and display them in the generated report PDF).
+    * Possibly separate ``App.tsx`` into multiple files.
+    * Possibly make a line graph to show the exact score that the sentiment analyzer gave for each user message over time.
+
+  </details>
+  
+* <details><summary> New folder structure </summary>
+
+    ```diff
+      AI-Support-Agent/
+        ├── app/
+        │   ├── main.py
+        │   ├── config.py
+        │   ├── middleware/
+        │   │   ├── logging.py
+        │   │   └── file_size_limit.py
+        │   ├── services/
+        │   │   ├── file_storage.py
+        │   │   ├── pdf_service.py
+        │   │   ├── document_repository.py
+        │   │   ├── embedding_service.py
+        │   │   ├── search_service.py
+        │   │   ├── chat_service.py
+        │   │   ├── conversation_service.py
+        │   │   ├── report_generator.py
+        │   │   ├── sentiment_service.py
+    +   │   │   └── entity_extractor.py			<-- NEW
+        │   ├── storage/
+        │   │   └── pdfs/
+        │   ├── core/
+        │   │   ├── errors.py
+        │   │   └── embeddings.py
+        │   ├── routers/
+        │   │   ├── health.py
+        │   │   ├── pdf.py
+        │   │   ├── qdrant_health.py
+        │   │   ├── embeddings.py
+        │   │   ├── search.py
+        │   │   └── chat.py
+        │   └── db/
+        │       ├── mongodb.py
+        │       └── qdrant.py
+        ├── qdrant_data/
+        │   └── ...
+        ├── reports/
+        │   └── ...
+        ├── frontend/
+        │   ├── node_modules/
+        │   │   └── ...
+        │   ├── public/
+        │   │   └── ...
+        │   ├── src/
+        │   │   ├── App.tsx
+        │   │   └── ...
+        │   └── ...
+        ├── .env
+        ├── .gitignore
+        ├── requirements.txt
+        └── README.md
+    ```
+  </details>
+
+</details>
 
 <!--
 <details><summary> Day N - 05/12/25 </summary>
@@ -5219,10 +5517,12 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
         │   │   ├── file_storage.py
         │   │   ├── pdf_service.py
         │   │   ├── document_repository.py
-        │   │   └── embedding_service.py
+        │   │   ├── embedding_service.py
         │   │   ├── search_service.py
         │   │   ├── chat_service.py
-        │   │   └── conversation_service.py
+        │   │   ├── conversation_service.py
+        │   │   ├── report_generator.py
+    +   │   │   └── sentiment_service.py			<-- NEW
         │   ├── storage/
         │   │   └── pdfs/
         │   ├── core/
@@ -5230,10 +5530,7 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
         │   │   └── embeddings.py
         │   ├── routers/
         │   │   ├── health.py
-        │   │   ├── pdf_upload.py
-        │   │   ├── pdf_extract.py
-    +   │   │   ├── pdf_delete.py              <-- NEW
-    +   │   │   ├── pdf_list.py                <-- NEW
+        │   │   ├── pdf.py
         │   │   ├── qdrant_health.py
         │   │   ├── embeddings.py
         │   │   ├── search.py
@@ -5242,6 +5539,8 @@ And the generated answer (using gpt-4o-mini) is only given the new question and 
         │       ├── mongodb.py
         │       └── qdrant.py
         ├── qdrant_data/
+        │   └── ...
+        ├── reports/
         │   └── ...
         ├── frontend/
         │   ├── node_modules/

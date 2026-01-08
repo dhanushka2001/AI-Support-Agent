@@ -11,6 +11,11 @@ from app.services.document_repository import (
     list_all_pdfs,
     get_document_text,
     update_embed_status,
+    store_extracted_entities,
+)
+from app.services.entity_extractor import (
+    extract_entities,
+    extract_sentence_entity_edges,
 )
 
 
@@ -49,6 +54,12 @@ def extract_pdf_text(file_id: str):
         text = extract_text_from_pdf(pdf_path)
 
         store_extracted_text(file_id, text)  # MongoDB
+
+        entities = extract_entities(text)
+
+        entity_edges = extract_sentence_entity_edges(text)
+
+        store_extracted_entities(file_id, entities, entity_edges)  # MongoDB
 
         return {
             "file_id": file_id,
